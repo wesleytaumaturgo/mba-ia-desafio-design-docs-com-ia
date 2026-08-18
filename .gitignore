@@ -9,3 +9,7 @@ coverage/
 .idea/
 .vscode/
 *.tsbuildinfo
+
+# ── Override do ~/.gitignore_global (linha 12: .planning/) ──
+# Artefatos de processo desta entrega precisam ser versionados.
+!.planning/
