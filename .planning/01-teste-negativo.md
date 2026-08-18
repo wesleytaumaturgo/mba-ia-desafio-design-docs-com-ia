@@ -246,3 +246,136 @@ Só restam os arquivos novos deste bloco (`.planning/01-matriz.md`,
 tocado nem criado neste bloco. Nenhuma sabotagem permanece; `src/`, `prisma/`,
 `tests/`, `TRANSCRICAO.md`, `.gitignore` e `package.json` estão no estado
 original de `$BASE`.
+
+---
+
+# 01b — Prova de que INV-1 falha por lista de PERMISSÃO
+
+Anexo de 2026-08-18, referente ao `scripts/verify.sh` **v2**. Não substitui nada
+do registro acima: as provas da seção "INV-1 — código intocado" foram feitas
+contra a v0/v1, que implementava INV-1 como lista de BLOQUEIO (array
+`PROTEGIDOS` com `src`, `prisma`, `tests`, `package.json`, `package-lock.json`,
+`tsconfig.json`, `TRANSCRICAO.md`).
+
+Auditoria de disco mostrou que aquela formulação tinha dois buracos medidos:
+
+1. **Tudo que não estava na enumeração passava.** `.gitignore`,
+   `vitest.config.ts`, `docker-compose.yml`, `tsconfig.build.json`,
+   `.eslintrc.json`, `.prettierrc`, `.prettierignore` e `.env.example` podiam
+   ser alterados sem INV-1 falhar.
+2. **Arquivo NOVO dentro de `src/` passava**, porque a lista era resolvida
+   contra o que existia em `$BASE` — o que não existia lá não era conferido.
+
+A v2 inverte a regra: o conjunto PERMITIDO é `{ README.md, docs/**,
+.planning/**, scripts/** }` e qualquer caminho fora dele que apareça como
+modificado (M), criado (A), removido (D) ou untracked é violação. As duas
+fontes são `git diff --name-status "$BASE" -- .` e
+`git ls-files --others --exclude-standard`.
+
+Os quatro testes abaixo são o critério de aceite dessa inversão: N1, N2 e N3
+têm que FALHAR (se algum passar, a inversão não está aplicada) e N4 tem que
+PASSAR (se falhar, o conjunto permitido está errado).
+
+### N1 — arquivo de configuração fora da enumeração antiga (`vitest.config.ts`)
+
+```
+$ echo "" >> vitest.config.ts
+$ ./scripts/verify.sh
+verify.sh v2 — BASE=93e557087e6112aa8628f91024a80542b8af9a44
+engine: /usr/bin/grep grep (GNU grep) 3.11
+
+INV-1 FALHA — caminho(s) fora do conjunto permitido (README.md, docs/**, .planning/**, scripts/**):
+  M   vitest.config.ts
+INV-2 OK — 323 linhas / 21011 bytes conferidos, sha256 == sha256 em $BASE [cdc56e0e86430ce966ffac71229b6968137f943c465ea7d957117fd229f20f14]
+INV-3 OK — 5 sondas testadas em docs/, docs/adrs/, .planning/, scripts/ e README.md, nenhuma bloqueada por .gitignore
+INV-4 OK — 76 caminhos no índice, nenhum indevido (node_modules/, .env, dist/, .idea/, .DS_Store)
+
+3/4 OK
+$ echo $?
+1
+$ git checkout -- vitest.config.ts
+$ git status --porcelain
+ M .planning/01-teste-negativo.md
+ M scripts/verify.sh
+?? .planning/paths-reais.txt
+```
+
+**Esperado:** INV-1 FALHA. Sob a lista de bloqueio anterior este caso passava, porque `vitest.config.ts` não estava no array `PROTEGIDOS`.
+
+### N2 — `.gitignore`
+
+```
+$ echo "" >> .gitignore
+$ ./scripts/verify.sh
+verify.sh v2 — BASE=93e557087e6112aa8628f91024a80542b8af9a44
+engine: /usr/bin/grep grep (GNU grep) 3.11
+
+INV-1 FALHA — caminho(s) fora do conjunto permitido (README.md, docs/**, .planning/**, scripts/**):
+  M   .gitignore
+INV-2 OK — 323 linhas / 21011 bytes conferidos, sha256 == sha256 em $BASE [cdc56e0e86430ce966ffac71229b6968137f943c465ea7d957117fd229f20f14]
+INV-3 OK — 5 sondas testadas em docs/, docs/adrs/, .planning/, scripts/ e README.md, nenhuma bloqueada por .gitignore
+INV-4 OK — 76 caminhos no índice, nenhum indevido (node_modules/, .env, dist/, .idea/, .DS_Store)
+
+3/4 OK
+$ echo $?
+1
+$ git checkout -- .gitignore
+$ git status --porcelain
+ M .planning/01-teste-negativo.md
+ M scripts/verify.sh
+?? .planning/paths-reais.txt
+```
+
+**Esperado:** INV-1 FALHA. Mesmo buraco de N1: `.gitignore` não constava da enumeração de bloqueio.
+
+### N3 — arquivo NOVO, untracked, dentro de `src/`
+
+```
+$ mkdir -p src/modules/webhooks && touch src/modules/webhooks/probe.ts
+$ ./scripts/verify.sh
+verify.sh v2 — BASE=93e557087e6112aa8628f91024a80542b8af9a44
+engine: /usr/bin/grep grep (GNU grep) 3.11
+
+INV-1 FALHA — caminho(s) fora do conjunto permitido (README.md, docs/**, .planning/**, scripts/**):
+  untracked  src/modules/webhooks/probe.ts
+INV-2 OK — 323 linhas / 21011 bytes conferidos, sha256 == sha256 em $BASE [cdc56e0e86430ce966ffac71229b6968137f943c465ea7d957117fd229f20f14]
+INV-3 OK — 5 sondas testadas em docs/, docs/adrs/, .planning/, scripts/ e README.md, nenhuma bloqueada por .gitignore
+INV-4 OK — 76 caminhos no índice, nenhum indevido (node_modules/, .env, dist/, .idea/, .DS_Store)
+
+3/4 OK
+$ echo $?
+1
+$ rm -rf src/modules/webhooks
+$ git status --porcelain
+ M .planning/01-teste-negativo.md
+ M scripts/verify.sh
+?? .planning/paths-reais.txt
+```
+
+**Esperado:** INV-1 FALHA, com status `untracked`. Este é o caso que a lista de bloqueio não tinha como pegar: `git diff` contra `$BASE` não enxerga arquivo untracked, e o caminho não existia em `$BASE` para ser conferido. É a razão de a fonte 2 (`git ls-files --others`) ser obrigatória.
+
+### N4 — arquivos dentro do conjunto permitido (prova de ausência de falso positivo)
+
+```
+$ touch docs/probe.md scripts/probe.sh
+$ ./scripts/verify.sh
+verify.sh v2 — BASE=93e557087e6112aa8628f91024a80542b8af9a44
+engine: /usr/bin/grep grep (GNU grep) 3.11
+
+INV-1 OK — 13 caminhos examinados (M/A/D/untracked), 0 fora do conjunto permitido (README.md, docs/**, .planning/**, scripts/**)
+INV-2 OK — 323 linhas / 21011 bytes conferidos, sha256 == sha256 em $BASE [cdc56e0e86430ce966ffac71229b6968137f943c465ea7d957117fd229f20f14]
+INV-3 OK — 5 sondas testadas em docs/, docs/adrs/, .planning/, scripts/ e README.md, nenhuma bloqueada por .gitignore
+INV-4 OK — 76 caminhos no índice, nenhum indevido (node_modules/, .env, dist/, .idea/, .DS_Store)
+
+4/4 OK
+$ echo $?
+0
+$ rm -f docs/probe.md scripts/probe.sh
+$ git status --porcelain
+ M .planning/01-teste-negativo.md
+ M scripts/verify.sh
+?? .planning/paths-reais.txt
+```
+
+**Esperado:** INV-1 **OK**. `docs/**` e `scripts/**` estão no conjunto permitido; a contagem de examinados sobe (dois untracked a mais) e o número de violações continua zero. Se este teste falhasse, o conjunto permitido estaria errado e o verificador bloquearia a própria produção dos entregáveis.
+

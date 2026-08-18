@@ -6,7 +6,7 @@ sozinho — ver "Decisões normativas" e a nota de cada ID marcado com ⚠.
 
 | ID | Critério (texto do enunciado) | Comando que prova | Evidência em | Bloco |
 | --- | --- | --- | --- | --- |
-| RA-1 | "A restrição de não alterar o código da aplicação é absoluta: o código serve de contexto e referência" + `src/`, `prisma/`, `tests/`, configurações e `TRANSCRICAO.md` não podem ser alterados | `git diff --name-only $BASE -- src prisma tests package.json package-lock.json tsconfig.json TRANSCRICAO.md` vazio + `sha256sum TRANSCRICAO.md` == hash em `$BASE` | `scripts/verify.sh` INV-1 + INV-2 | **2 (hoje)** |
+| RA-1 | "A restrição de não alterar o código da aplicação é absoluta: o código serve de contexto e referência" — implementado por **lista de PERMISSÃO**: só `README.md`, `docs/**`, `.planning/**` e `scripts/**` podem divergir de `$BASE`; qualquer outro caminho modificado (M), criado (A), removido (D) ou untracked é violação | `git diff --name-status $BASE -- .` **e** `git ls-files --others --exclude-standard`: nenhum caminho fora do conjunto permitido + `sha256sum TRANSCRICAO.md` == hash em `$BASE` | `scripts/verify.sh` INV-1 + INV-2 | **2 (hoje)** |
 | RA-2 | "Toda informação registrada nos documentos deve ser rastreável à transcrição ou ao código fonte da aplicação. Não é permitido inventar requisitos, decisões ou restrições sem origem identificável." | cruzamento: todo ID citado em PRD/RFC/FDD/ADR aparece como linha em TRACKER.md com Fonte + Localização válida | `scripts/verify.sh` (checagem cruzada Tracker × demais docs, a implementar) | 10 (reforçado continuamente pelo Bloco 8) |
 | PRD-1 ⚠ | "Arquivo existe e está em Markdown" | `test -f docs/PRD.md` **e** `wc -w docs/PRD.md` ≥ 120 **e** zero ocorrências de `<!--.*(a ser elaborado\|será preenchido).*-->` | `scripts/verify.sh` (a estender) | 7 |
 | PRD-2 | "Contém todas as seções obrigatórias listadas no requisito 1" (12 seções: Resumo e contexto · Problema e motivação · Público-alvo e cenários de uso · Objetivos e métricas de sucesso · Escopo · Requisitos funcionais · Requisitos não funcionais · Decisões e trade-offs principais · Dependências · Riscos e mitigação · Critérios de aceitação · Estratégia de testes e validação) | `grep -qi '^## '"<título>"'' docs/PRD.md` para cada uma das 12 | `scripts/verify.sh` (a estender) | 7 |
@@ -136,11 +136,12 @@ registro, MAN-01 permanece pendente.
 
 ## Duas linhas de reprova
 
-- **RA-1 (código intocado):** se qualquer arquivo sob `src/`, `prisma/`,
-  `tests/`, `package.json`, `package-lock.json`, `tsconfig.json` ou
-  `TRANSCRICAO.md` mudar em relação a `$BASE`, a entrega reprova
+- **RA-1 (código intocado):** se qualquer caminho **fora** do conjunto
+  `{ README.md, docs/**, .planning/**, scripts/** }` divergir de `$BASE` — seja
+  por modificação, criação, remoção ou por estar untracked —, a entrega reprova
   independentemente do conteúdo dos documentos. É a restrição absoluta do
-  enunciado.
+  enunciado. A regra é uma lista de permissão de propósito: enumerar o que é
+  proibido deixa passar tudo que a enumeração esquecer.
 - **RA-2 (nada registrado sem origem rastreável):** se um requisito, decisão
   ou restrição aparecer em PRD/RFC/FDD/ADR sem linha correspondente e
   verificável em `TRACKER.md`, a entrega reprova mesmo que os documentos
@@ -149,7 +150,7 @@ registro, MAN-01 permanece pendente.
 
 ## Estado
 
-**Verificável HOJE (`scripts/verify.sh` v1):** apenas os 4
+**Verificável HOJE (`scripts/verify.sh` v2):** apenas os 4
 invariantes de baixo nível — INV-1, INV-2, INV-3, INV-4. Nenhum ID de critério
 de aceite (PRD-\*, RFC-\*, FDD-\*, ADR-\*, TRK-\*, RME-\*, GER-\*) é
 mecanicamente verificável ainda, porque todos dependem de conteúdo que ainda
@@ -203,5 +204,8 @@ demais é o defeito, não texto de menos.
 
 | Data | O que mudou | Motivo |
 | --- | --- | --- |
+| 2026-08-18 | **RA-1 reescrito de lista de BLOQUEIO para lista de PERMISSÃO** em `scripts/verify.sh` v2, com as duas linhas de reprova atualizadas | O patch P1.1 já tinha pedido esta inversão e **ela não foi aplicada** — auditoria de disco encontrou o array `PROTEGIDOS` ainda no código, com os 7 caminhos originais. O buraco era medido, não teórico: `.gitignore`, `vitest.config.ts`, `docker-compose.yml`, `tsconfig.build.json`, `.eslintrc.json`, `.prettierrc`, `.prettierignore` e `.env.example` podiam ser alterados sem INV-1 falhar, e um arquivo NOVO criado dentro de `src/` também passava, porque a lista só conferia o que já existia em `$BASE`. Agora o conjunto permitido é `{ README.md, docs/**, .planning/**, scripts/** }` e as fontes são `git diff --name-status` mais `git ls-files --others --exclude-standard`. Provado por N1..N4 em `.planning/01-teste-negativo.md`. |
+| 2026-08-18 | Fonte de verdade de **GER-2** passa a ser `git ls-files` no momento da verificação | `.planning/00-inventario-paths.txt` é um snapshot do Bloco 0, com 67 caminhos contra 76 no índice de hoje — já defasado. Onde os comandos de prova de FDD-5, ADR-4 e GER-2 citam esse arquivo, leia-se `git ls-files` executado na hora. Retificação registrada em `.planning/00-preflight.md` §0.6. |
+| 2026-08-18 | `.planning/paths-reais.txt` apagado | Identificado por comando como byte-a-byte igual a `git ls-files -- src prisma tests` (diff vazio, exit 0): era o insumo da lista de bloqueio do INV-1, que deixou de existir. Sem consumidor, seria só uma segunda fonte de verdade defasável. |
 | 2026-08-18 | Acrescentado **MAN-01** à tabela de critérios e criada a seção "Verificações manuais" | REC-09 (`customer_id` derivado do JWT) ficou marcado `[sem âncora viável]` em `.planning/02-recusa.md` e existia só como nota solta num documento. Sem linha de matriz, uma verificação que ninguém consegue automatizar também é uma verificação que ninguém lembra de fazer. Agora tem ID, alvo escrito e documento onde o resultado é registrado. |
 | 2026-08-18 | Referência de `scripts/verify.sh` atualizada de v0 para v1 na seção "Estado" | O verificador ganhou guardas contra passagem vazia (exit 2 / `ERRO DE VERIFICAÇÃO`), contagem de entradas em toda linha OK e resolução determinística do binário de grep. Os quatro invariantes cobertos continuam os mesmos — INV-1..INV-4 —, e nenhuma lógica de FALHA foi alterada. Motivador: o patch das âncoras encontrou, dentro do próprio INV-7, um check que imprimia OK com zero entradas carregadas; a auditoria subsequente achou a mesma classe de defeito em INV-1, INV-2 e INV-4. |

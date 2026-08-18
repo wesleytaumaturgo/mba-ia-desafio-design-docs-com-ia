@@ -264,6 +264,52 @@ aqui — decisão a ser tomada antes de criar os ADRs.
 
 ## 0.6 Inventário de caminhos (insumo do verificador anti-alucinação)
 
+> **Retificação de 2026-08-18.** Esta seção foi corrigida em dois pontos: a
+> fonte de verdade do critério GER-2 e o destino de `.planning/paths-reais.txt`.
+> O texto original abaixo fica preservado como registro do que foi feito no
+> Bloco 0.
+>
+> **(1) A fonte de verdade de GER-2 é `git ls-files` no momento da
+> verificação, nunca um snapshot em arquivo.** `.planning/00-inventario-paths.txt`
+> foi gerado no Bloco 0 e já está defasado — tinha 67 caminhos e o índice hoje
+> tem 76. Um snapshot envelhece em silêncio: um caminho criado depois dele
+> apareceria como "inexistente no repositório" e reprovaria GER-2 por engano,
+> e um caminho removido depois dele continuaria sendo aceito. O arquivo
+> permanece versionado como registro histórico do Bloco 0, mas **não é
+> normativo** — todo check que precise saber se um caminho existe consulta
+> `git ls-files` na hora. A matriz (`.planning/01-matriz.md`) cita
+> `00-inventario-paths.txt` nos comandos de prova de FDD-5, ADR-4 e GER-2; onde
+> ele aparecer, leia-se `git ls-files` executado no momento da verificação.
+>
+> **(2) `.planning/paths-reais.txt` foi APAGADO.** Era um rascunho untracked de
+> sessão anterior. A identificação foi feita por comando, não por leitura:
+>
+> ```
+> $ wc -l .planning/paths-reais.txt
+> 47 .planning/paths-reais.txt
+>
+> $ diff <(git ls-files) .planning/paths-reais.txt | wc -l
+> 32
+>
+> $ diff <(git ls-files -- src prisma tests) .planning/paths-reais.txt
+> $ echo $?
+> 0
+>
+> $ git ls-files --error-unmatch .planning/paths-reais.txt
+> error: pathspec '.planning/paths-reais.txt' did not match any file(s) known to git
+> Did you forget to 'git add'?
+> ```
+>
+> O `diff` contra `git ls-files -- src prisma tests` saiu vazio (exit 0): o
+> arquivo era **exatamente a lista de caminhos protegidos**, isto é, o insumo da
+> lista de BLOQUEIO do INV-1. Como o INV-1 passou a ser uma lista de PERMISSÃO
+> em `scripts/verify.sh` v2, essa lista deixou de existir como conceito e o
+> arquivo não tem mais consumidor. Manter um snapshot de 47 caminhos de `src/`,
+> `prisma/` e `tests/` só criaria uma segunda fonte de verdade defasável, que é
+> justamente o defeito descrito no ponto (1). Removido com `rm`; nunca esteve
+> no índice, então não há reversão de commit envolvida.
+
+
 ```
 $ git ls-files > .planning/00-inventario-paths.txt
 $ wc -l .planning/00-inventario-paths.txt

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
-# verify.sh v1 — cobre apenas INV-1..INV-4 (invariantes cujos alvos já existem).
+# verify.sh v2 — cobre apenas INV-1..INV-4 (invariantes cujos alvos já existem).
 # Ver .planning/01-matriz.md para o restante dos critérios de aceite e seus blocos.
+#
+# v2 (2026-08-18) inverte o INV-1: de lista de BLOQUEIO para lista de PERMISSÃO.
+#   Só README.md, docs/**, .planning/** e scripts/** podem divergir de $BASE.
+#   Motivo e cobertura do buraco anterior: ver o comentário do próprio INV-1 e
+#   os testes negativos N1..N4 em .planning/01-teste-negativo.md.
 #
 # v1 (2026-08-18) acrescenta, sem alterar nenhuma lógica de FALHA:
 #   - resolução determinística do binário de grep (linha `engine:` na saída);
@@ -59,26 +64,73 @@ git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null \
 pass=0
 total=4
 
-echo "verify.sh v1 — BASE=$BASE"
+echo "verify.sh v2 — BASE=$BASE"
 echo "engine: $GREP $GREP_VER"
 echo
 
 # ---------------------------------------------------------------------------
-# INV-1: código e transcrição intocados desde BASE (restrição absoluta do enunciado)
+# INV-1: nada fora do conjunto permitido muda desde BASE.
+#
+# Este check é uma lista de PERMISSÃO, não de bloqueio. A versão anterior
+# enumerava o que era proibido tocar (src/, prisma/, tests/, package.json,
+# package-lock.json, tsconfig.json, TRANSCRICAO.md) e por isso deixava passar
+# tudo que não estivesse na enumeração: .gitignore, vitest.config.ts,
+# docker-compose.yml, tsconfig.build.json, .eslintrc.json, .prettierrc,
+# .prettierignore e .env.example podiam ser alterados sem falhar. Pior: como a
+# lista era resolvida contra o que EXISTIA em $BASE, um arquivo NOVO criado
+# dentro de src/ também passava.
+#
+# A regra agora é única e fechada: só README.md, docs/**, .planning/** e
+# scripts/** podem divergir de $BASE. Qualquer outro caminho modificado (M),
+# criado (A), removido (D) ou untracked é violação, exista ele em $BASE ou não.
 # ---------------------------------------------------------------------------
-PROTEGIDOS=(src prisma tests package.json package-lock.json tsconfig.json TRANSCRICAO.md)
-n_prot="$(git ls-tree -r --name-only "$BASE" -- "${PROTEGIDOS[@]}" | wc -l)"
-# Passagem vazia comprovada: um pathspec que não casa nada devolve diff vazio e
-# o check imprimiria OK guardando um conjunto vazio de arquivos.
-[ "$n_prot" -gt 0 ] || erro "INV-1 não encontrou nenhum caminho protegido em \$BASE — pathspec vazio ou errado"
+permitido() {
+  case "$1" in
+    README.md|docs/*|.planning/*|scripts/*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
 
-diff_out="$(git diff --name-only "$BASE" -- "${PROTEGIDOS[@]}" 2>&1)"
-if [ -z "$diff_out" ]; then
-  echo "INV-1 OK — $n_prot caminhos protegidos conferidos (src/, prisma/, tests/, package.json, package-lock.json, tsconfig.json, TRANSCRICAO.md), nenhum modificado desde \$BASE"
+inv1_examinados=0
+inv1_violacoes=""
+
+# Fonte 1: tudo que diverge de $BASE no work tree (tracked).
+while IFS=$'\t' read -r st p1 p2; do
+  [ -n "${st:-}" ] || continue
+  case "$st" in
+    R*|C*)  # rename/copy: os dois lados contam
+      for p in "$p1" "$p2"; do
+        [ -n "$p" ] || continue
+        inv1_examinados=$((inv1_examinados + 1))
+        permitido "$p" || inv1_violacoes+="  $st  $p"$'\n'
+      done
+      ;;
+    *)
+      inv1_examinados=$((inv1_examinados + 1))
+      permitido "$p1" || inv1_violacoes+="  $st   $p1"$'\n'
+      ;;
+  esac
+done < <(git diff --name-status "$BASE" -- .)
+
+# Fonte 2: arquivos novos ainda não rastreados.
+while IFS= read -r p; do
+  [ -n "$p" ] || continue
+  inv1_examinados=$((inv1_examinados + 1))
+  permitido "$p" || inv1_violacoes+="  untracked  $p"$'\n'
+done < <(git ls-files --others --exclude-standard)
+
+# Guarda de passagem vazia: as duas fontes mudas enquanto o repositório declara
+# ter mudanças significa que o check não mediu nada.
+if [ "$inv1_examinados" -eq 0 ] && [ -n "$(git status --porcelain)" ]; then
+  erro "INV-1 examinou 0 caminhos, mas git status --porcelain não está vazio — as fontes do check não estão medindo nada"
+fi
+
+if [ -z "$inv1_violacoes" ]; then
+  echo "INV-1 OK — $inv1_examinados caminhos examinados (M/A/D/untracked), 0 fora do conjunto permitido (README.md, docs/**, .planning/**, scripts/**)"
   pass=$((pass + 1))
 else
-  echo "INV-1 FALHA — arquivos protegidos modificados desde \$BASE:"
-  echo "$diff_out" | sed 's/^/  /'
+  echo "INV-1 FALHA — caminho(s) fora do conjunto permitido (README.md, docs/**, .planning/**, scripts/**):"
+  printf '%s' "$inv1_violacoes"
 fi
 
 # ---------------------------------------------------------------------------
