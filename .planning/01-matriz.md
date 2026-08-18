@@ -42,9 +42,13 @@ sozinho — ver "Decisões normativas" e a nota de cada ID marcado com ⚠.
 | GER-2 | "Nenhum arquivo de código mencionado nos documentos é inexistente no repositório" | extrair todo caminho tipo `src/...`, `prisma/...`, `tests/...` citado em `docs/*.md` e `docs/adrs/*.md`; cada um deve estar em `.planning/00-inventario-paths.txt` | `scripts/verify.sh` (a estender) | 10 |
 | EST-1 | Árvore obrigatória do entregável (seção "Estrutura obrigatória do entregável") presente e rastreável | hoje (parcial): `git check-ignore -v` com sondas em cada diretório protegido vazio (INV-3). Completo: todos os caminhos da árvore do enunciado existem com conteúdo real | `scripts/verify.sh` INV-3 (parcial) / a estender (completo) | **2 (parcial, hoje)** / 10 (completo) |
 | EST-2 (novo) | `docs/adrs/` não deve conter nada além de `ADR-NNN-*.md` e `README.md` (implícito na estrutura obrigatória + no formato de nome do requisito 4) | `git ls-files docs/adrs \| grep -vE '^docs/adrs/(README\.md\|ADR-[0-9]{3}-[a-z0-9-]+\.md)$'` vazio | `scripts/verify.sh` (a estender) | 4 |
+| MAN-01 | REC-09 `customer_id` derivado do JWT não pode aparecer como decisão vigente | verificação MANUAL — ERE sem lookaround não distingue a adoção da negativa (DEC-17) | `.planning/09-review.md` | 9 |
 
 ⚠ = critério que o enunciado descreve como "arquivo existe", mas que **não** é
 implementado como `test -f` sozinho — ver "Decisões normativas".
+
+MAN-NN = verificação que **não** tem comando que prove — ver "Verificações
+manuais". Um MAN-NN nunca conta como coberto por `scripts/verify.sh`.
 
 ## Decisões normativas
 
@@ -66,6 +70,55 @@ convenção `ADR-NNN-*`, no **Bloco 4**. Não tocado neste bloco.
 mais que o número real de ADRs — por isso ADR-1 exige explicitamente a
 igualdade `contagem(ADR-NNN-*.md) == contagem(*.md) − 1`, não apenas "entre 5
 e 8", como forma de autodetectar essa divergência antes da entrega.
+
+## Verificações manuais
+
+Verificações que nenhum comando prova, e que por isso precisam de um revisor
+humano com um alvo escrito. Se novos MAN-NN surgirem nos próximos blocos, é
+aqui que moram. A regra é a mesma de sempre: um item que não tem comando não
+pode ser contado como verde por `scripts/verify.sh` — ele fica visível como
+pendência até alguém registrar o resultado da revisão no documento indicado.
+
+### MAN-01 — `customer_id` derivado do JWT (REC-09)
+
+**O que foi recusado.** Marcos propôs em `[09:31] Marcos` que o `customer_id`
+viesse implícito do JWT. Bruno apontou em `[09:32] Bruno` que o JWT atual é do
+usuário operador, não do cliente, e Larissa fechou em `[09:32] Larissa` que o
+`customer_id` **não** vem do JWT. O item está em `.planning/02-recusa.md` como
+REC-09, DESCARTADO.
+
+**Por que não é automatizável.** A âncora precisaria casar a adoção ("o
+`customer_id` é derivado do JWT") e **não** casar a decisão correta, que é a
+mesma frase na negativa ("o `customer_id` **não** vem do JWT", DEC-17). ERE não
+tem lookaround, então nenhum padrão separa as duas. Duas tentativas foram
+gastas e ambas casaram os dois casos — o registro completo, com a saída dos
+testes, está em `.planning/02-recusa.md`, seção "Itens sem âncora viável".
+Trocar para PCRE (`grep -P`) resolveria a negação, mas mudaria o contrato de
+todas as outras 14 âncoras, que são ERE e estão provadas em ERE; o custo não se
+justifica por um item.
+
+**O que o revisor precisa procurar.** Em `docs/PRD.md`, `docs/RFC.md`,
+`docs/FDD.md` e `docs/adrs/ADR-*.md`, localizar toda menção a `customer_id`
+junto de JWT/token e classificar cada ocorrência em uma de três:
+
+1. **Correta** — afirma que o `customer_id` vem do body ou do path, e/ou nega
+   explicitamente a origem no JWT. Nada a fazer.
+2. **Vazamento** — afirma, exige ou implica que o `customer_id` é extraído,
+   derivado, inferido ou lido do JWT/token. Reprova; o documento tem que ser
+   corrigido.
+3. **Ambígua** — cita os dois sem dizer qual vale. Tratar como vazamento até
+   ser reescrita, porque um leitor implementaria o caminho errado.
+
+Ponto de partida sugerido para a varredura (é um filtro amplo de propósito, para
+não perder ocorrência; a classificação é humana):
+
+```
+grep -rniE 'customer_?id' docs/ | grep -iE 'jwt|token|claim'
+```
+
+**Onde registrar o resultado.** `.planning/09-review.md`, no bloco 9, com a
+lista de ocorrências encontradas e a classificação de cada uma. Sem esse
+registro, MAN-01 permanece pendente.
 
 ## Convenções
 
@@ -96,7 +149,7 @@ e 8", como forma de autodetectar essa divergência antes da entrega.
 
 ## Estado
 
-**Verificável HOJE (Bloco 2, `scripts/verify.sh` v0):** apenas os 4
+**Verificável HOJE (`scripts/verify.sh` v1):** apenas os 4
 invariantes de baixo nível — INV-1, INV-2, INV-3, INV-4. Nenhum ID de critério
 de aceite (PRD-\*, RFC-\*, FDD-\*, ADR-\*, TRK-\*, RME-\*, GER-\*) é
 mecanicamente verificável ainda, porque todos dependem de conteúdo que ainda
@@ -106,6 +159,8 @@ não existe (ver `.planning/01-scaffolding.md`).
 - **EST-1** está parcialmente coberto por INV-3 hoje (garante que a árvore
   *pode* ser versionada); a checagem completa (árvore inteira com conteúdo
   real) só fecha no Bloco 10.
+- **MAN-01** não é verificável por comando em bloco nenhum, por construção —
+  fecha por revisão humana registrada em `.planning/09-review.md` no Bloco 9.
 - Todos os demais IDs entram no bloco indicado na coluna "Bloco" da tabela
   acima.
 
@@ -143,3 +198,10 @@ RFC recebe adicionalmente um **teto** (RFC-6, 2400 palavras ≈ 4 páginas de
 ~600 palavras) porque o enunciado pede concisão explícita ("documento conciso,
 2 a 4 páginas... não deve duplicar o detalhamento do FDD") — nesse caso, texto
 demais é o defeito, não texto de menos.
+
+## Revisões
+
+| Data | O que mudou | Motivo |
+| --- | --- | --- |
+| 2026-08-18 | Acrescentado **MAN-01** à tabela de critérios e criada a seção "Verificações manuais" | REC-09 (`customer_id` derivado do JWT) ficou marcado `[sem âncora viável]` em `.planning/02-recusa.md` e existia só como nota solta num documento. Sem linha de matriz, uma verificação que ninguém consegue automatizar também é uma verificação que ninguém lembra de fazer. Agora tem ID, alvo escrito e documento onde o resultado é registrado. |
+| 2026-08-18 | Referência de `scripts/verify.sh` atualizada de v0 para v1 na seção "Estado" | O verificador ganhou guardas contra passagem vazia (exit 2 / `ERRO DE VERIFICAÇÃO`), contagem de entradas em toda linha OK e resolução determinística do binário de grep. Os quatro invariantes cobertos continuam os mesmos — INV-1..INV-4 —, e nenhuma lógica de FALHA foi alterada. Motivador: o patch das âncoras encontrou, dentro do próprio INV-7, um check que imprimia OK com zero entradas carregadas; a auditoria subsequente achou a mesma classe de defeito em INV-1, INV-2 e INV-4. |
