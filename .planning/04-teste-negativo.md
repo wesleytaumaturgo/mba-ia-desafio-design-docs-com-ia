@@ -4,6 +4,11 @@ Cada um dos cinco checks novos de `scripts/verify.sh` v3 foi sabotado de verdade
 rodado, revertido e rodado de novo. Saída literal desta sessão. Nenhuma sabotagem
 permanece no repositório ao final (ver `git status --porcelain` na última seção).
 
+O arquivo tem duas partes: **N1..N5**, que provam os cinco checks da v3, e
+**S1..S3** no fim, que provam o ADR-3 reescrito na v3.1 — o N3 original testava a
+versão do check que media o mapa de `.planning/03-design.md` §4, e as saídas
+coladas na primeira parte são as da v3, preservadas como estavam.
+
 Contexto da execução: os oito ADRs e o README já estavam **staged** (`git add
 docs/adrs scripts/verify.sh`) quando os testes rodaram — é o que torna
 `git checkout -- <arquivo>` uma reversão real para N2 e N3, e é por isso que o
@@ -301,3 +306,127 @@ Nenhuma sabotagem sobreviveu: nem o nono ADR, nem o `NOTAS.md`, nem as edições
 | ADR-3 | `DEC-10` trocada por `DEC-99` em `ADR-005` | S |
 | ADR-4 | `(novo)` em todos os caminhos de `ADR-006` e `ADR-007`, em cópia sob `/tmp` | S |
 | EST-2 | `touch docs/adrs/NOTAS.md` | S |
+
+---
+
+# Patch v3.1 — ADR-3 com denominador externo
+
+O ADR-3 da v3 media duas coisas que não eram o critério: a cobertura das DEC do
+mapa de `.planning/03-design.md` §4 — mapa escrito no mesmo movimento que
+planejou os ADRs — e seis regex digitadas dentro do próprio script, sem prova de
+discriminância. O critério do enunciado é cobertura de **5 das 6 decisões
+principais da reunião**, e esse denominador precisa viver fora dos ADRs: agora
+está em `.planning/04-cobertura.md`, com T1/T2 por âncora.
+
+As três sabotagens abaixo atacam o check novo. **Nenhum ADR foi alterado neste
+patch** — `docs/adrs/` está byte-a-byte como no commit `89bb51c`.
+
+## S1 — dois ADRs de decisões principais distintas apagados
+
+Apagar ADR-001 (COB-1, Outbox no MySQL) e ADR-003 (COB-2, retry/backoff/DLQ) de
+uma cópia deixa 4 das 6 decisões cobertas — abaixo do mínimo de 5. A cópia leva o
+`README.md` junto, de propósito: assim ADR-1, ADR-2, ADR-4 e EST-2 continuam
+verdes e o único check que reprova é o que está sob teste.
+
+```
+$ cp docs/adrs/*.md "$TMP/s1/"
+$ rm "$TMP/s1/ADR-001-outbox-no-mysql.md" "$TMP/s1/ADR-003-retry-backoff-e-dlq-em-tabela-separada.md"
+$ ls "$TMP/s1"
+ADR-002-worker-processo-separado-polling.md
+ADR-004-hmac-sha256-secret-por-endpoint.md
+ADR-005-entrega-at-least-once-com-x-event-id.md
+ADR-006-reuso-dos-padroes-existentes.md
+ADR-007-insercao-na-outbox-dentro-da-transacao.md
+ADR-008-modelo-de-autorizacao-do-modulo.md
+README.md
+
+$ ADR_DIR="$TMP/s1" ./scripts/verify.sh
+verify.sh v3.1 — BASE=93e557087e6112aa8628f91024a80542b8af9a44
+engine: /usr/bin/grep grep (GNU grep) 3.11
+
+INV-1 OK — 24 caminhos examinados (M/A/D/untracked), 0 fora do conjunto permitido (README.md, docs/**, .planning/**, scripts/**)
+INV-2 OK — 323 linhas / 21011 bytes conferidos, sha256 == sha256 em $BASE [cdc56e0e86430ce966ffac71229b6968137f943c465ea7d957117fd229f20f14]
+INV-3 OK — 5 sondas testadas em docs/, docs/adrs/, .planning/, scripts/ e README.md, nenhuma bloqueada por .gitignore
+INV-4 OK — 89 caminhos no índice, nenhum indevido (node_modules/, .env, dist/, .idea/, .DS_Store)
+ADR-1 OK — 6 ADRs no formato ADR-NNN-titulo-em-kebab-case.md (faixa 5–8), 7 arquivos .md em $TMP/s1, 6 esperados fora o README.md
+ADR-2 OK — 6 ADRs examinados, 7 seções conferidas em cada (5 headers MADR + Positivas/Negativas não vazias)
+ADR-3 FALHA — 6 decisões principais examinadas, 4 cobertas (mínimo 5); sem cobertura: COB-1 COB-2
+ADR-4 OK — 6 ADRs examinados, 47 caminhos distintos sem (novo) conferidos contra git ls-files, 6 ADR(s) com pelo menos um caminho real
+EST-2 OK — 7 entradas em $TMP/s1, todas ADR-NNN-*.md ou README.md
+
+8/9 OK
+exit: 1
+```
+
+**FALHA como esperado, com 4/6 e os dois IDs nomeados.** A sabotagem rodou sobre
+cópia; `docs/adrs/` não foi tocada.
+
+Contraste com a v3: o mesmo recorte deixava a perna dos nomes em 4/6 mas a perna
+das DEC continuava fechando, e a linha somava as duas — o motivo da reprova ficava
+ilegível. Agora a saída diz qual decisão principal ficou descoberta.
+
+## S2 — denominador esvaziado tem que dar exit 2, não OK
+
+```
+$ : > .planning/04-cobertura.md
+$ wc -c .planning/04-cobertura.md
+0 .planning/04-cobertura.md
+
+$ ./scripts/verify.sh; echo "exit: $?"
+verify.sh v3.1 — BASE=93e557087e6112aa8628f91024a80542b8af9a44
+engine: /usr/bin/grep grep (GNU grep) 3.11
+
+INV-1 OK — 24 caminhos examinados (M/A/D/untracked), 0 fora do conjunto permitido (README.md, docs/**, .planning/**, scripts/**)
+INV-2 OK — 323 linhas / 21011 bytes conferidos, sha256 == sha256 em $BASE [cdc56e0e86430ce966ffac71229b6968137f943c465ea7d957117fd229f20f14]
+INV-3 OK — 5 sondas testadas em docs/, docs/adrs/, .planning/, scripts/ e README.md, nenhuma bloqueada por .gitignore
+INV-4 OK — 89 caminhos no índice, nenhum indevido (node_modules/, .env, dist/, .idea/, .DS_Store)
+ADR-1 OK — 8 ADRs no formato ADR-NNN-titulo-em-kebab-case.md (faixa 5–8), 9 arquivos .md em docs/adrs, 8 esperados fora o README.md
+ADR-2 OK — 8 ADRs examinados, 7 seções conferidas em cada (5 headers MADR + Positivas/Negativas não vazias)
+ERRO DE VERIFICAÇÃO — ADR-3 carregou 0 âncora(s) de .planning/04-cobertura.md — o denominador são as 6 decisões principais do enunciado
+exit: 2
+```
+
+Sem denominador não há medição: o check sai por `exit 2` e derruba a execução
+inteira, em vez de imprimir `ADR-3 OK — 0 decisões cobertas`. É a mesma classe de
+defeito que as guardas de passagem vazia da v1 fecharam nos invariantes.
+
+```
+$ git checkout -- .planning/04-cobertura.md
+$ wc -c .planning/04-cobertura.md
+16996 .planning/04-cobertura.md
+```
+
+**exit 2 como esperado.** Reversão confirmada.
+
+## S3 — estado limpo, sem falso positivo
+
+```
+$ ./scripts/verify.sh; echo "exit: $?"
+verify.sh v3.1 — BASE=93e557087e6112aa8628f91024a80542b8af9a44
+engine: /usr/bin/grep grep (GNU grep) 3.11
+
+INV-1 OK — 24 caminhos examinados (M/A/D/untracked), 0 fora do conjunto permitido (README.md, docs/**, .planning/**, scripts/**)
+INV-2 OK — 323 linhas / 21011 bytes conferidos, sha256 == sha256 em $BASE [cdc56e0e86430ce966ffac71229b6968137f943c465ea7d957117fd229f20f14]
+INV-3 OK — 5 sondas testadas em docs/, docs/adrs/, .planning/, scripts/ e README.md, nenhuma bloqueada por .gitignore
+INV-4 OK — 89 caminhos no índice, nenhum indevido (node_modules/, .env, dist/, .idea/, .DS_Store)
+ADR-1 OK — 8 ADRs no formato ADR-NNN-titulo-em-kebab-case.md (faixa 5–8), 9 arquivos .md em docs/adrs, 8 esperados fora o README.md
+ADR-2 OK — 8 ADRs examinados, 7 seções conferidas em cada (5 headers MADR + Positivas/Negativas não vazias)
+ADR-3 OK — 6 decisões principais examinadas, 6 cobertas (mínimo 5): COB-1 COB-2 COB-3 COB-4 COB-5 COB-6
+ADR-4 OK — 8 ADRs examinados, 57 caminhos distintos sem (novo) conferidos contra git ls-files, 8 ADR(s) com pelo menos um caminho real
+EST-2 OK — 9 entradas em docs/adrs, todas ADR-NNN-*.md ou README.md
+
+9/9 OK
+exit: 0
+```
+
+**6/6, sem falso positivo.** As seis cobertas são as seis do enunciado, e cada uma
+casou pela âncora provada em `.planning/04-cobertura.md`, não por presença de
+palavra solta.
+
+## Resumo do patch v3.1
+
+| Sabotagem | Esperado | Resultado |
+|---|---|---|
+| S1 — ADR-001 e ADR-003 apagados da cópia | FALHA com 4/6 | `ADR-3 FALHA — 6 decisões principais examinadas, 4 cobertas (mínimo 5); sem cobertura: COB-1 COB-2` · exit 1 |
+| S2 — `.planning/04-cobertura.md` esvaziado | exit 2, não OK | `ERRO DE VERIFICAÇÃO — ADR-3 carregou 0 âncora(s)` · exit 2 |
+| S3 — estado limpo | 6/6, sem falso positivo | `ADR-3 OK — 6 decisões principais examinadas, 6 cobertas (mínimo 5): COB-1 … COB-6` · exit 0 |

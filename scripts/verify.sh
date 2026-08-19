@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
-# verify.sh v3 — cobre INV-1..INV-4 (invariantes) e ADR-1..ADR-4 + EST-2 (bloco 4).
+# verify.sh v3.1 — cobre INV-1..INV-4 (invariantes) e ADR-1..ADR-4 + EST-2 (bloco 4).
 # Ver .planning/01-matriz.md para o restante dos critérios de aceite e seus blocos.
+#
+# v3.1 (2026-08-19) reescreve o ADR-3 com denominador EXTERNO aos ADRs:
+#   as 6 decisões principais do enunciado e suas âncoras provadas vêm de
+#   .planning/04-cobertura.md. A v3 tirava o denominador de .planning/03-design.md
+#   §4 (o mesmo mapa que planejou os ADRs) e mantinha as 6 regex dentro do
+#   script, sem prova de discriminância — media consistência interna do pacote,
+#   não cobertura. Sabotagens S1..S3 em .planning/04-teste-negativo.md.
+#   Nenhum ADR foi alterado por este patch.
 #
 # v3 (2026-08-19) acrescenta os cinco checks do pacote de ADRs:
 #   ADR-1 formato e contagem de arquivos · ADR-2 seções MADR com conteúdo ·
-#   ADR-3 cobertura das DEC do mapa §4 e dos 6 nomes do enunciado ·
+#   ADR-3 cobertura das decisões principais ·
 #   ADR-4 ADR que referencia caminho real do código · EST-2 higiene da pasta.
 #   Os cinco leem $ADR_DIR (default docs/adrs), parametrizável para que os testes
 #   negativos rodem contra uma cópia sob /tmp — ver .planning/04-teste-negativo.md.
@@ -73,7 +81,7 @@ ADR_DIR="${ADR_DIR:-docs/adrs}"
 pass=0
 total=9
 
-echo "verify.sh v3 — BASE=$BASE"
+echo "verify.sh v3.1 — BASE=$BASE"
 echo "engine: $GREP $GREP_VER"
 echo
 
@@ -281,58 +289,51 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# ADR-3: (a) todo DEC-NN do mapa decisão→ADR de .planning/03-design.md §4 aparece
-# em algum ADR; (b) pelo menos 5 dos 6 nomes de decisão do enunciado cobertos.
-# O mapa é lido só das linhas de tabela '| ADR-NNN |' para não capturar as DEC
-# que o próprio §4 declara como exclusivas do FDD.
+# ADR-3: o conjunto de ADRs cobre no mínimo 5 das 6 decisões principais da
+# reunião — o critério literal do enunciado.
+#
+# O denominador é EXTERNO aos ADRs: as seis decisões e suas âncoras vêm da
+# tabela de .planning/04-cobertura.md, digitada à mão a partir do enunciado e
+# provada discriminante (T1/T2) naquele arquivo. A versão anterior deste check
+# tirava o denominador de .planning/03-design.md §4 — o mesmo mapa que planejou
+# os ADRs — e mantinha as seis regex dentro do próprio script, sem prova: media
+# consistência interna do pacote, não cobertura das decisões da reunião.
+#
+# Uma linha marcada `[sem âncora viável]` conta como NÃO coberta e vira
+# verificação manual (MAN-NN) — jamais coberta por omissão.
 # ---------------------------------------------------------------------------
-DESIGN=".planning/03-design.md"
-[ -r "$DESIGN" ] || erro "ADR-3 não consegue ler $DESIGN"
-decs="$(awk -F'|' '/^\| ADR-[0-9][0-9][0-9] \|/ {print $4}' "$DESIGN" | "$GREP" -oE '[0-9]{2}' | sort -u)"
-n_decs="$(printf '%s\n' "$decs" | "$GREP" -c . || true)"
-# Passagem vazia: mapa vazio faria o laço de cobertura não comparar nada.
-[ "$n_decs" -gt 0 ] || erro "ADR-3 não extraiu nenhum DEC-NN do mapa §4 de $DESIGN"
+COBERTURA=".planning/04-cobertura.md"
+[ -r "$COBERTURA" ] || erro "ADR-3 não consegue ler $COBERTURA"
+# 3a coluna da tabela = âncora ERE; o \| do markdown é desescapado.
+cob_tab="$(sed -nE 's/^\| *(COB-[0-9]) *\|[^|]*\| *`(.*)` *\| *(ADR-[0-9]{3}).*/\1\t\2/p' "$COBERTURA" \
+             | sed 's/\\|/|/g')"
+n_cob="$(printf '%s' "$cob_tab" | "$GREP" -c . || true)"
+# Passagem vazia e denominador adulterado: as duas saem por exit 2, não por OK.
+[ "$n_cob" -ge 6 ] || erro "ADR-3 carregou $n_cob âncora(s) de $COBERTURA — o denominador são as 6 decisões principais do enunciado"
+[ "$n_cob" -le 6 ] || erro "ADR-3 carregou $n_cob âncoras de $COBERTURA — o denominador tem que ser exatamente 6, nem uma a mais"
 
-adr3_faltando=""
-while IFS= read -r _d; do
-  [ -n "$_d" ] || continue
-  "$GREP" -qF -- "DEC-$_d" ${adr_files[@]+"${adr_files[@]}"} || adr3_faltando+=" DEC-$_d"
-done <<< "$decs"
-
-nomes_label=(
-  "Padrão Outbox no MySQL"
-  "Retry com backoff e DLQ"
-  "HMAC-SHA256 com secret por endpoint"
-  "At-least-once com X-Event-Id"
-  "Worker em processo separado em polling"
-  "Reuso dos padrões existentes"
-)
-nomes_re=(
-  '[Oo]utbox.*MySQL|MySQL.*[Oo]utbox'
-  '[Bb]ackoff.*(DLQ|dead[_ -]?letter)|(DLQ|dead[_ -]?letter).*[Bb]ackoff'
-  'HMAC-SHA256.*secret|secret.*HMAC-SHA256'
-  '[Aa]t-least-once.*X-Event-Id|X-Event-Id.*[Aa]t-least-once'
-  '[Ww]orker.*polling|polling.*[Ww]orker'
-  '[Rr]euso.*(padr|AppError|Pino)'
-)
-n_nomes="${#nomes_label[@]}"
-[ "$n_nomes" -eq 6 ] || erro "ADR-3: a lista dos nomes do enunciado tem $n_nomes entradas, não 6"
-nomes_cobertos=0
-nomes_ausentes=""
-for _i in "${!nomes_re[@]}"; do
-  if "$GREP" -qE -- "${nomes_re[$_i]}" ${adr_files[@]+"${adr_files[@]}"}; then
-    nomes_cobertos=$((nomes_cobertos + 1))
-  else
-    nomes_ausentes+="  ${nomes_label[$_i]}"$'\n'
+adr3_cobertas=0
+adr3_cobertos_ids=""
+adr3_descobertas=""
+while IFS=$'\t' read -r _cob _anc; do
+  [ -n "$_cob" ] || continue
+  if [ "$_anc" = "[sem âncora viável]" ]; then
+    adr3_descobertas+=" $_cob(sem âncora viável — verificação manual)"
+    continue
   fi
-done
+  if "$GREP" -qiE -e "$_anc" -- ${adr_files[@]+"${adr_files[@]}"}; then
+    adr3_cobertas=$((adr3_cobertas + 1))
+    adr3_cobertos_ids+=" $_cob"
+  else
+    adr3_descobertas+=" $_cob"
+  fi
+done <<< "$cob_tab"
 
-if [ -z "$adr3_faltando" ] && [ "$nomes_cobertos" -ge 5 ]; then
-  echo "ADR-3 OK — $n_decs DEC do mapa §4 conferidas, todas presentes nos $adr2_examinados ADRs; $nomes_cobertos/6 nomes do enunciado cobertos (mínimo 5)"
+if [ "$adr3_cobertas" -ge 5 ]; then
+  echo "ADR-3 OK — $n_cob decisões principais examinadas, $adr3_cobertas cobertas (mínimo 5):$adr3_cobertos_ids"
   pass=$((pass + 1))
 else
-  echo "ADR-3 FALHA — DEC do mapa §4 ausente(s) nos ADRs:${adr3_faltando:- nenhuma}; nomes cobertos: $nomes_cobertos/6 (mínimo 5)"
-  [ -n "$nomes_ausentes" ] && printf '%s' "$nomes_ausentes"
+  echo "ADR-3 FALHA — $n_cob decisões principais examinadas, $adr3_cobertas cobertas (mínimo 5); sem cobertura:$adr3_descobertas"
 fi
 
 # ---------------------------------------------------------------------------
