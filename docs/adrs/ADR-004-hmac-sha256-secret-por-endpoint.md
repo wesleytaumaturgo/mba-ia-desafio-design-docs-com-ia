@@ -111,7 +111,8 @@ Gerar a nova secret e invalidar a anterior no mesmo instante.
   valem: uma secret vazada continua aceita por um dia inteiro depois de o cliente
   ter rotacionado (`[09:21] Sofia`).
 - A lista de `redactPaths` do logger (`src/shared/logger/index.ts`:4–11) cobre
-  hoje `authorization`, `cookie`, `*.password`, `*.token` e `*.accessToken` —
+  hoje `authorization`, `cookie`, `*.password`, `*.passwordHash`, `*.token` e
+  `*.accessToken` —
   nenhum campo de secret de webhook. Sem entrada nova nessa lista, qualquer log
   que carregue o objeto de configuração do endpoint imprime a secret em claro.
 - A verificação da assinatura é trabalho do lado do cliente: a plataforma assume

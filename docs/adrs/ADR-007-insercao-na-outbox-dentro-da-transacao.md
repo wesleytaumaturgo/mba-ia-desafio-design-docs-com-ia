@@ -51,9 +51,7 @@ primeiro argumento, no formato de `debitStock`
 construtor do `OrderService` (`src/modules/orders/order.service.ts`:27–30). O
 filtro por status decidido para a feature é aplicado **na inserção**, não na hora
 do envio: só vira linha de outbox a transição que algum endpoint cadastrado quer
-ouvir — o símbolo natural para esse predicado é
-`src/modules/orders/order.status.ts`, ao lado de `shouldDebitStock` (linha 29),
-com a mesma forma `(from, to) => boolean`.
+ouvir.
 
 Falas que fecham:
 
@@ -114,8 +112,10 @@ quais endpoints querem aquele status.
 - O filtro na inserção mantém a outbox proporcional ao que alguém quer receber, e
   não ao volume de transições do sistema (DEC-18).
 - O predicado de filtro tem lugar natural em
-  `src/modules/orders/order.status.ts`, onde a política de transição já é dado e
-  não `if` espalhado pelo service.
+  `src/modules/orders/order.status.ts`, ao lado de `shouldDebitStock` (linha 29)
+  e com a mesma forma `(from, to) => boolean`, onde a política de transição já é
+  dado e não `if` espalhado pelo service — (colocação proposta por esta ADR, não
+  decidida na reunião).
 
 ### Negativas
 
