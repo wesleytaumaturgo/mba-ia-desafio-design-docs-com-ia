@@ -1,7 +1,25 @@
 #!/usr/bin/env bash
-# verify.sh v5 — cobre INV-1..INV-4 (invariantes), ADR-1..ADR-4 + EST-2 (bloco 4),
-# RFC-1..RFC-6 (bloco 5) e FDD-1..FDD-7 (bloco 6).
+# verify.sh v6 — cobre INV-1..INV-4 (invariantes), ADR-1..ADR-4 + EST-2 (bloco 4),
+# RFC-1..RFC-6 (bloco 5), FDD-1..FDD-7 (bloco 6) e PRD-1..PRD-6 + INV-7 (bloco 7).
 # Ver .planning/01-matriz.md para o restante dos critérios de aceite e seus blocos.
+#
+# v6 (2026-08-19) acrescenta os sete checks do PRD:
+#   PRD-1 existência, tamanho mínimo e ausência de placeholder ·
+#   PRD-2 os 12 headers '## ' canônicos + '### Fora de escopo' ·
+#   PRD-3 ≥8 requisitos funcionais rastreáveis (PRD-FR-NN) ·
+#   PRD-4 ≥1 objetivo com meta numérica em §Objetivos e métricas de sucesso ·
+#   PRD-5 ≥2 itens em §Fora de escopo, todos com '[hh:mm] Nome' conferível ·
+#   PRD-6 ≥2 riscos com Probabilidade/Impacto/Mitigação preenchidos ·
+#   INV-7 nenhum item de .planning/02-recusa.md reaparece como requisito
+#   vigente (PRD-FR-NN, PRD-RNF-NN, FDD-CONTRATO-NN, FDD-ERR-NN) em docs/PRD.md
+#   ou docs/FDD.md. Especificado em .planning/02-recusa.md §INV-7 v2, que só
+#   entrou em uso agora porque antes docs/PRD.md e docs/FDD.md eram stubs (um
+#   INV-7 contra arquivo vazio passa por vacuidade). Os seis checks PRD-* leem
+#   $PRD_FILE (default docs/PRD.md), parametrizável para que os testes
+#   negativos rodem contra uma cópia sob /tmp — ver .planning/07-teste-negativo.md.
+#   O denominador do PRD-2 (a lista de 12 headers '## ' + '### Fora de escopo')
+#   é digitado à mão a partir de .planning/03-design.md §6, NUNCA extraído do
+#   próprio PRD.
 #
 # v5 (2026-08-19) acrescenta os sete checks do FDD:
 #   FDD-1 existência, tamanho mínimo e ausência de placeholder ·
@@ -106,11 +124,12 @@ git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null \
 ADR_DIR="${ADR_DIR:-docs/adrs}"
 RFC_FILE="${RFC_FILE:-docs/RFC.md}"
 FDD_FILE="${FDD_FILE:-docs/FDD.md}"
+PRD_FILE="${PRD_FILE:-docs/PRD.md}"
 
 pass=0
-total=22
+total=29
 
-echo "verify.sh v5 — BASE=$BASE"
+echo "verify.sh v6 — BASE=$BASE"
 echo "engine: $GREP $GREP_VER"
 echo
 
@@ -861,6 +880,210 @@ if [ "$fdd7_n" -eq 0 ]; then
 else
   echo "FDD-7 FALHA — $fdd7_n linha(s) afirmando que a coluna do schema se chama por um dos cinco termos snake_case (exigido: 0) em $FDD_FILE:"
   printf '%s\n' "$fdd7_violacoes" | sed 's/^/  /'
+fi
+
+# ===========================================================================
+# Bloco 7 — PRD-1..PRD-6 sobre $PRD_FILE, e INV-7 (vazamento de recusa).
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# PRD-1: o arquivo existe, tem no mínimo 900 palavras e não sobrou placeholder
+# do esqueleto.
+# ---------------------------------------------------------------------------
+prd_existe=0
+[ -f "$PRD_FILE" ] && prd_existe=1
+
+prd1_palavras=0
+prd1_placeholder=0
+if [ "$prd_existe" -eq 1 ]; then
+  prd1_palavras="$(wc -w < "$PRD_FILE" | tr -d ' ')" \
+    || erro "PRD-1 não conseguiu contar palavras de $PRD_FILE"
+  prd1_placeholder="$("$GREP" -cE '<!--.*(a ser elaborado|será preenchido).*-->' "$PRD_FILE" || true)"
+fi
+
+if [ "$prd_existe" -eq 1 ] && [ "$prd1_palavras" -ge 900 ] && [ "$prd1_placeholder" -eq 0 ]; then
+  echo "PRD-1 OK — $PRD_FILE existe, $prd1_palavras palavras (mínimo 900), $prd1_placeholder placeholder(s) do esqueleto"
+  pass=$((pass + 1))
+elif [ "$prd_existe" -eq 0 ]; then
+  echo "PRD-1 FALHA — $PRD_FILE não existe"
+else
+  echo "PRD-1 FALHA — $prd1_palavras palavras (mínimo 900) e $prd1_placeholder placeholder(s) '<!-- ... a ser elaborado / será preenchido ... -->' (exigido: 0) em $PRD_FILE"
+fi
+
+# Sem arquivo, PRD-2..PRD-6 e INV-7 não medem nada — passagem vazia sai por
+# exit 2, e não por uma sequência de OK ou de FALHA que fingiria ter medido.
+[ "$prd_existe" -eq 1 ] || erro "PRD-2..PRD-6 e INV-7 não têm o que medir: $PRD_FILE ausente"
+
+# ---------------------------------------------------------------------------
+# PRD-2: as 12 seções canônicas '## ' de .planning/03-design.md §6, header
+# literal, mais o header '### Fora de escopo' — a subseção de que PRD-5
+# depende para enumerar o que foi descartado ou adiado.
+#
+# A lista abaixo é o denominador e é digitada à mão a partir de §6 — extraí-la
+# do próprio PRD mediria o arquivo contra ele mesmo.
+# ---------------------------------------------------------------------------
+prd2_headers=(
+  "## Resumo e contexto"
+  "## Problema e motivação"
+  "## Público-alvo e cenários de uso"
+  "## Objetivos e métricas de sucesso"
+  "## Escopo"
+  "## Requisitos funcionais"
+  "## Requisitos não funcionais"
+  "## Decisões e trade-offs principais"
+  "## Dependências"
+  "## Riscos e mitigação"
+  "## Critérios de aceitação"
+  "## Estratégia de testes e validação"
+)
+# Denominador adulterado (header somado ou removido do array) sai por exit 2.
+[ "${#prd2_headers[@]}" -eq 12 ] \
+  || erro "PRD-2 carregou ${#prd2_headers[@]} header(s) '## ' no denominador — §6 de .planning/03-design.md tem exatamente 12 headers '## ' para o PRD"
+
+prd2_ausentes=""
+prd2_conferidos=0
+for _h in "${prd2_headers[@]}"; do
+  prd2_conferidos=$((prd2_conferidos + 1))
+  "$GREP" -qxF "$_h" "$PRD_FILE" || prd2_ausentes+="  header ausente: '$_h'"$'\n'
+done
+prd2_conferidos=$((prd2_conferidos + 1))
+"$GREP" -qxF "### Fora de escopo" "$PRD_FILE" || prd2_ausentes+="  header ausente: '### Fora de escopo'"$'\n'
+
+if [ -z "$prd2_ausentes" ]; then
+  echo "PRD-2 OK — $prd2_conferidos headers canônicos conferidos em $PRD_FILE (12 '## ' + '### Fora de escopo'), 0 ausentes"
+  pass=$((pass + 1))
+else
+  echo "PRD-2 FALHA — $prd2_conferidos headers conferidos:"
+  printf '%s' "$prd2_ausentes"
+fi
+
+# ---------------------------------------------------------------------------
+# PRD-3: pelo menos 8 linhas de tabela com ID PRD-FR-NN em §Requisitos
+# funcionais — o critério literal do enunciado (11 conceituais estão
+# disponíveis; a folga sobre o mínimo de 8 já existe por construção).
+# ---------------------------------------------------------------------------
+prd3_n="$("$GREP" -cE '^\| *PRD-FR-[0-9]{2} *\|' "$PRD_FILE" || true)"
+if [ "$prd3_n" -ge 8 ]; then
+  echo "PRD-3 OK — $prd3_n linhas '| PRD-FR-NN |' em $PRD_FILE (mínimo 8)"
+  pass=$((pass + 1))
+else
+  echo "PRD-3 FALHA — $prd3_n linha(s) '| PRD-FR-NN |' em $PRD_FILE (mínimo 8)"
+fi
+
+# ---------------------------------------------------------------------------
+# PRD-4: dentro da §Objetivos e métricas de sucesso, pelo menos 1 linha com
+# meta numérica quantitativa (%, ms, s, min ou segundo(s)).
+# ---------------------------------------------------------------------------
+prd4_secao="$(awk '/^## Objetivos e métricas de sucesso$/ {f=1; next} /^## / {f=0} f' "$PRD_FILE")"
+# Seção vazia: o check não mediu nada e não pode imprimir OK por omissão.
+[ -n "$prd4_secao" ] || erro "PRD-4 encontrou a seção '## Objetivos e métricas de sucesso' vazia (ou ausente) em $PRD_FILE"
+
+prd4_n="$(printf '%s\n' "$prd4_secao" | "$GREP" -cE '[0-9]+ *(%|ms|s|min|segundos?)' || true)"
+if [ "$prd4_n" -ge 1 ]; then
+  echo "PRD-4 OK — $prd4_n linha(s) com meta quantitativa (%, ms, s, min, segundo(s)) na §Objetivos e métricas de sucesso (mínimo 1)"
+  pass=$((pass + 1))
+else
+  echo "PRD-4 FALHA — $prd4_n linha(s) com meta quantitativa na §Objetivos e métricas de sucesso (mínimo 1)"
+fi
+
+# ---------------------------------------------------------------------------
+# PRD-5: dentro de '### Fora de escopo', pelo menos 2 itens de lista
+# ('- ' ou '* '), e TODOS eles com uma Localização '[hh:mm] Nome' conferível —
+# a marca de D-08 de que o item veio da lista de recusa, não foi inventado.
+# ---------------------------------------------------------------------------
+prd5_secao="$(awk '/^### Fora de escopo$/ {f=1; next} /^#/ {f=0} f' "$PRD_FILE")"
+[ -n "$prd5_secao" ] || erro "PRD-5 encontrou a seção '### Fora de escopo' vazia (ou ausente) em $PRD_FILE"
+
+prd5_itens_raw="$(printf '%s\n' "$prd5_secao" | "$GREP" -E '^[-*] ' || true)"
+prd5_n_itens="$(printf '%s' "$prd5_itens_raw" | "$GREP" -c . || true)"
+prd5_n_com_loc="$(printf '%s' "$prd5_itens_raw" | "$GREP" -cE '\[[0-9]{2}:[0-9]{2}\] [A-ZÀ-Ý][a-zà-ÿ]+' || true)"
+
+if [ "$prd5_n_itens" -ge 2 ] && [ "$prd5_n_com_loc" -eq "$prd5_n_itens" ]; then
+  echo "PRD-5 OK — $prd5_n_itens itens de lista em §Fora de escopo (mínimo 2), $prd5_n_com_loc com '[hh:mm] Nome' conferível (todos)"
+  pass=$((pass + 1))
+else
+  echo "PRD-5 FALHA — $prd5_n_itens item(ns) de lista em §Fora de escopo (mínimo 2), $prd5_n_com_loc com '[hh:mm] Nome' conferível (exigido: todos)"
+fi
+
+# ---------------------------------------------------------------------------
+# PRD-6: dentro da §Riscos e mitigação, pelo menos 2 linhas de tabela com os
+# 3 campos Probabilidade, Impacto e Mitigação preenchidos (além do próprio
+# Risco).
+# ---------------------------------------------------------------------------
+prd6_secao="$(awk '/^## Riscos e mitigação$/ {f=1; next} /^## / {f=0} f' "$PRD_FILE")"
+[ -n "$prd6_secao" ] || erro "PRD-6 encontrou a seção '## Riscos e mitigação' vazia (ou ausente) em $PRD_FILE"
+
+prd6_ok="$(printf '%s\n' "$prd6_secao" | awk -F'|' '
+  /^\|/ {
+    if (NF < 6) next
+    risco=$2; prob=$3; imp=$4; mit=$5
+    gsub(/^[ \t]+|[ \t]+$/, "", risco)
+    gsub(/^[ \t]+|[ \t]+$/, "", prob)
+    gsub(/^[ \t]+|[ \t]+$/, "", imp)
+    gsub(/^[ \t]+|[ \t]+$/, "", mit)
+    if (risco == "Risco" || risco ~ /^-+$/) next
+    if (length(prob) > 0 && length(imp) > 0 && length(mit) > 0) c++
+  }
+  END { print c+0 }
+')"
+
+if [ "$prd6_ok" -ge 2 ]; then
+  echo "PRD-6 OK — $prd6_ok linha(s) de risco com Probabilidade/Impacto/Mitigação preenchidos na §Riscos e mitigação (mínimo 2)"
+  pass=$((pass + 1))
+else
+  echo "PRD-6 FALHA — $prd6_ok linha(s) de risco com os 3 campos preenchidos na §Riscos e mitigação (mínimo 2)"
+fi
+
+# ---------------------------------------------------------------------------
+# INV-7: nenhum item de .planning/02-recusa.md pode reaparecer como requisito
+# vigente no PRD ou no FDD. Especificado em .planning/02-recusa.md §INV-7 v2.
+# A âncora regex de cada REC-NN só é procurada DENTRO de linhas que comecem
+# com ID de requisito rastreável — nunca em prosa, onde a menção ao recusado
+# é legítima (§Fora de escopo, §Alternativas consideradas, §Questões em
+# aberto).
+# ---------------------------------------------------------------------------
+INV7_RECUSA="${INV7_RECUSA:-.planning/02-recusa.md}"
+read -r -a inv7_alvos <<< "${INV7_ALVOS:-$PRD_FILE $FDD_FILE}"
+INV7_ID_RE='^\| *(PRD-FR|PRD-RNF|FDD-CONTRATO|FDD-ERR)-[0-9]{2} *\|'
+
+[ -r "$INV7_RECUSA" ] || erro "INV-7 não consegue ler a lista de recusa: $INV7_RECUSA"
+
+# 3a coluna da tabela de recusa = âncora regex; o \| do markdown é desescapado.
+inv7_ancoras="$(sed -nE 's/^\| *(REC-[0-9]{2}) *\|[^|]*\| *`(.*)` *\| *(DESCARTADO|ADIADO).*/\1\t\2/p' "$INV7_RECUSA" \
+                 | sed 's/\\|/|/g')"
+inv7_n_anc="$(printf '%s' "$inv7_ancoras" | "$GREP" -c . || true)"
+# Passagem vazia e denominador adulterado: as duas saem por exit 2, não por OK.
+[ "$inv7_n_anc" -ge 14 ] \
+  || erro "INV-7 carregou $inv7_n_anc âncora(s) de $INV7_RECUSA — mínimo 14 (guarda contra denominador vazio ou truncado)"
+
+inv7_vaz=0
+inv7_usadas=0
+inv7_saida=""
+while IFS=$'\t' read -r _rec _anc; do
+  [ -n "$_rec" ] || continue
+  [ "$_anc" = "[sem âncora viável]" ] && continue
+  inv7_usadas=$((inv7_usadas + 1))
+  for _alvo in "${inv7_alvos[@]}"; do
+    [ -f "$_alvo" ] || continue
+    while IFS= read -r _hit; do
+      [ -n "$_hit" ] || continue
+      _lnum="${_hit%%:*}"
+      _texto="${_hit#*:}"
+      _reqid="$(printf '%s' "$_texto" | sed -E 's/^\| *([A-Z]+-[A-Z]+-[0-9]{2}).*/\1/')"
+      inv7_saida+="  VAZAMENTO  $_rec -> $_reqid  ($_alvo:$_lnum)"$'\n'
+      inv7_saida+="             $(printf '%s' "$_texto" | cut -c1-100)"$'\n'
+      inv7_vaz=$((inv7_vaz + 1))
+    done < <("$GREP" -nE "$INV7_ID_RE" "$_alvo" | "$GREP" -iE "$_anc")
+  done
+done <<< "$inv7_ancoras"
+
+echo "INV-7 — $inv7_n_anc item(ns) na lista de recusa, $inv7_usadas com âncora aplicável, alvos: ${inv7_alvos[*]}"
+if [ "$inv7_vaz" -eq 0 ]; then
+  echo "INV-7 OK — nenhum item recusado reaparece como requisito"
+  pass=$((pass + 1))
+else
+  echo "INV-7 FALHA — $inv7_vaz vazamento(s):"
+  printf '%s' "$inv7_saida"
 fi
 
 echo
