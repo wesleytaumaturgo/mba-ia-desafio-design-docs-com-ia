@@ -1,8 +1,19 @@
 #!/usr/bin/env bash
-# verify.sh v7 — cobre INV-1..INV-4 (invariantes), ADR-1..ADR-4 + EST-2 (bloco 4),
-# RFC-1..RFC-6 (bloco 5), FDD-1..FDD-7 (bloco 6), PRD-1..PRD-6 + INV-7 (bloco 7)
-# e TRK-1..TRK-4 + GER-2 (bloco 8).
+# verify.sh v8 — cobre INV-1..INV-4 (invariantes), ADR-1..ADR-4 + EST-2 (bloco 4),
+# RFC-1..RFC-6 (bloco 5), FDD-1..FDD-7 (bloco 6), PRD-1..PRD-6 + INV-7 (bloco 7),
+# TRK-1..TRK-4 + GER-2 (bloco 8) e RME-1..RME-4 (bloco 9).
 # Ver .planning/01-matriz.md para o restante dos critérios de aceite e seus blocos.
+#
+# v8 (2026-08-19) acrescenta os quatro checks do README de processo:
+#   RME-1 os 6 headers '## ' canônicos de .planning/03-design.md §6, literais,
+#   E zero ocorrência de 'Critérios de Aceite'/'Área de entrega'/'Repositório
+#   base' — prova de que o enunciado saiu do arquivo, não só que os títulos
+#   novos entraram · RME-2 §Ferramentas de IA utilizadas tem ≥1 item de lista
+#   '- ' · RME-3 §Prompts customizados tem ≥2 pares de fence ``` (≥2 blocos de
+#   código) · RME-4 §Iterações e ajustes tem ≥2 itens de lista, cada um citando
+#   arquivo (caminho entre crases) ou número. Os quatro leem $README_FILE
+#   (default README.md), parametrizável para que os testes negativos rodem
+#   contra cópia sob /tmp — ver .planning/12-teste-negativo.md.
 #
 # v7 (2026-08-19) acrescenta os cinco checks do tracker:
 #   TRK-1 header literal da tabela principal + toda linha de dados com 6
@@ -140,11 +151,12 @@ FDD_FILE="${FDD_FILE:-docs/FDD.md}"
 PRD_FILE="${PRD_FILE:-docs/PRD.md}"
 TRACKER_FILE="${TRACKER_FILE:-docs/TRACKER.md}"
 TRANSCRICAO_FILE="${TRANSCRICAO_FILE:-TRANSCRICAO.md}"
+README_FILE="${README_FILE:-README.md}"
 
 pass=0
-total=34
+total=38
 
-echo "verify.sh v7 — BASE=$BASE"
+echo "verify.sh v8 — BASE=$BASE"
 echo "engine: $GREP $GREP_VER"
 echo
 
@@ -1268,6 +1280,102 @@ if [ -z "$ger2_ausentes" ]; then
 else
   echo "GER-2 FALHA — caminho(s) ausente(s) do índice do git e sem o marcador (novo):"
   printf '%s' "$ger2_ausentes"
+fi
+
+# ---------------------------------------------------------------------------
+# RME-1..RME-4: README de processo (bloco 9, requisito 6).
+# ---------------------------------------------------------------------------
+[ -r "$README_FILE" ] || erro "RME-1 não consegue ler $README_FILE"
+
+rme_secao() {
+  # imprime o corpo da seção '## <título>' até o próximo '## ' ou fim do arquivo
+  awk -v h="## $1" '
+    $0 == h { f=1; next }
+    f && /^## / { f=0 }
+    f { print }
+  ' "$README_FILE"
+}
+
+# RME-1: os 6 headers literais de .planning/03-design.md §6, na ordem, mais
+# zero resquício do enunciado substituído (títulos que só existiam nele).
+RME_HEADERS=(
+  "## Sobre o desafio"
+  "## Ferramentas de IA utilizadas"
+  "## Workflow adotado"
+  "## Prompts customizados"
+  "## Iterações e ajustes"
+  "## Como navegar a entrega"
+)
+rme1_faltando=""
+for h in "${RME_HEADERS[@]}"; do
+  "$GREP" -qxF "$h" "$README_FILE" || rme1_faltando+="  $h"$'\n'
+done
+rme1_resquicio="$("$GREP" -cE 'Critérios de Aceite|Área de entrega|Repositório base' "$README_FILE" || true)"
+
+if [ -z "$rme1_faltando" ] && [ "$rme1_resquicio" -eq 0 ]; then
+  echo "RME-1 OK — 6 headers canônicos conferidos em $README_FILE, 0 ausentes; 0 resquício de 'Critérios de Aceite'/'Área de entrega'/'Repositório base'"
+  pass=$((pass + 1))
+else
+  echo "RME-1 FALHA — header(s) ausente(s) (0 esperado):"
+  printf '%s' "$rme1_faltando"
+  echo "  resquício do enunciado: $rme1_resquicio ocorrência(s) (0 esperado)"
+fi
+
+# RME-2: §Ferramentas de IA utilizadas tem pelo menos 1 item de lista '- '.
+rme2_secao="$(rme_secao "Ferramentas de IA utilizadas")"
+rme2_itens="$(printf '%s\n' "$rme2_secao" | "$GREP" -cE '^- ' || true)"
+
+if [ "$rme2_itens" -ge 1 ]; then
+  echo "RME-2 OK — $rme2_itens item(ns) de lista em §Ferramentas de IA utilizadas (mínimo 1)"
+  pass=$((pass + 1))
+else
+  echo "RME-2 FALHA — $rme2_itens item(ns) de lista em §Ferramentas de IA utilizadas (mínimo 1)"
+fi
+
+# RME-3: §Prompts customizados tem pelo menos 2 pares de fence ``` (≥4 linhas
+# de fence, ou seja, ≥2 blocos de código completos).
+rme3_secao="$(rme_secao "Prompts customizados")"
+rme3_fences="$(printf '%s\n' "$rme3_secao" | "$GREP" -cE '^```' || true)"
+rme3_blocos=$((rme3_fences / 2))
+
+if [ "$rme3_blocos" -ge 2 ]; then
+  echo "RME-3 OK — $rme3_blocos bloco(s) de código em §Prompts customizados (mínimo 2), $rme3_fences fence(s) ao todo"
+  pass=$((pass + 1))
+else
+  echo "RME-3 FALHA — $rme3_blocos bloco(s) de código em §Prompts customizados (mínimo 2, a partir de $rme3_fences fence(s))"
+fi
+
+# RME-4: §Iterações e ajustes tem pelo menos 2 itens de lista (numerada ou
+# com hífen), cada um citando arquivo (caminho entre crases) ou número.
+rme4_secao="$(rme_secao "Iterações e ajustes")"
+# Um item de lista markdown normalmente continua em linhas físicas seguintes
+# até o próximo marcador ou linha em branco de separação; a citação (arquivo
+# ou número) pode estar em qualquer uma delas, não só na primeira. O awk junta
+# as linhas de cada item numa só linha de saída (as quebras internas viram
+# espaço), o que permite ler um item por linha depois, sem precisar de
+# separador especial. O marcador ('1. ', '2. ', '- ') é descartado do texto
+# testado, senão o próprio número de ordem da lista numerada satisfaz
+# trivialmente "cita número".
+rme4_itens_full="$(printf '%s\n' "$rme4_secao" | awk '
+  /^([0-9]+\.|-) / {
+    if (buf != "") print buf
+    buf = $0
+    next
+  }
+  /^[[:space:]]*$/ { next }
+  buf != "" { buf = buf " " $0 }
+  END { if (buf != "") print buf }
+' | sed -E 's/^([0-9]+\.|-) //')"
+rme4_n_itens="$(printf '%s\n' "$rme4_itens_full" | "$GREP" -c . || true)"
+rme4_sem_prova="$(printf '%s\n' "$rme4_itens_full" | "$GREP" -vE '`[^`]*[./][^`]*`|[0-9]' || true)"
+rme4_n_sem_prova="$(printf '%s' "$rme4_sem_prova" | "$GREP" -c . || true)"
+
+if [ "$rme4_n_itens" -ge 2 ] && [ "$rme4_n_sem_prova" -eq 0 ]; then
+  echo "RME-4 OK — $rme4_n_itens item(ns) em §Iterações e ajustes (mínimo 2), todos citando arquivo ou número"
+  pass=$((pass + 1))
+else
+  echo "RME-4 FALHA — $rme4_n_itens item(ns) em §Iterações e ajustes (mínimo 2); $rme4_n_sem_prova sem arquivo nem número:"
+  printf '%s\n' "$rme4_sem_prova" | sed 's/^/  /'
 fi
 
 echo
