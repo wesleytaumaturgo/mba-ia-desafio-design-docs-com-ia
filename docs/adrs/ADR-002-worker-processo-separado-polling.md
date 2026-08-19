@@ -115,6 +115,20 @@ reduzir o número de queries contra o MySQL.
   entrega é o teto da feature, e o cenário citado na reunião —
   `[09:38] Diego`, "Se o cliente tem 50 pedidos mudando de status em um minuto" —
   é atendido em série, não em paralelo.
+- **O alcance real da limitação é maior do que o declarado, e isso é descoberta
+  da análise, não da reunião.** A declaração original de DEC-04 condiciona a
+  ordem por `order_id` a "enquanto for single-worker" (`[09:13] Larissa`, citada
+  acima e mantida como está — é fala literal). A análise do algoritmo de seleção
+  descrito no FDD mostra que a condição não basta: o worker lê linhas com
+  `nextAttemptAt` vencido, então um evento que falhou e entrou em backoff **sai
+  do conjunto elegível** e um evento posterior do mesmo `order_id` passa na
+  frente dele — **com um worker só**. Ordenar os elegíveis por `createdAt` não
+  desfaz isso, porque o evento em backoff nem chega a ser candidato. Ou seja: a
+  ordem por `order_id` vale enquanto houver um único worker **e** nenhuma
+  entrega falhar; a primeira falha já a quebra. Ninguém na reunião levantou o
+  ponto, e nada aqui o resolve — se a ordem por pedido é contrato com o cliente
+  ou best-effort é decisão pendente, registrada em `RFC-QA-07` e em
+  `docs/FDD.md` §Não decidido na reunião.
 - **A configuração de pool que a reunião presumiu não existe (DIV-06).**
   `[09:29] Diego` — "o pool de conexão do Prisma já tá lá". O disco mostra outra
   coisa: `createPrismaClient` passa apenas `log` ao `PrismaClient`

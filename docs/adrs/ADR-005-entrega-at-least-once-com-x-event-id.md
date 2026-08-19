@@ -86,6 +86,16 @@ de repassar a responsabilidade ao cliente.
 - A duplicidade escala com a política de retentativa: até 5 entregas do mesmo
   evento (ADR-003), e o timeout de 10 segundos (`[09:42] Diego`) é o gatilho mais
   provável para gerar cópia de um evento que já foi processado.
+- **O "at least" de DEC-10 depende de um mecanismo de recuperação que a reunião
+  não decidiu.** At-least-once só vale se toda linha aceita for entregue pelo
+  menos uma vez, e o desenho do worker marca a linha como em processamento antes
+  de tentar o envio. Uma queda entre as duas coisas deixa a linha fora do
+  conjunto que o worker lê — zero entrega, não uma. A reunião não tratou de
+  lease, timeout de processamento nem reset no startup; nenhuma fala de
+  `[09:00]`–`[09:53]` toca no assunto. A garantia decidida em `[09:26] Larissa`
+  fica, portanto, **condicionada a uma decisão que ainda não existe**, registrada
+  em `RFC-QA-06` e em `docs/FDD.md` §Não decidido na reunião. Este ADR não a
+  toma: escolher o mecanismo aqui seria inventar decisão de reunião.
 - **A estabilidade do `event_id` vira restrição de implementação do replay.** Só
   há dedup se o identificador for do *evento*, não da linha que o transporta:
   como o replay da DLQ (ADR-003) cria uma linha nova de outbox, essa linha tem de

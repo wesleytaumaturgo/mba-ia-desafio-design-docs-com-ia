@@ -70,9 +70,8 @@ Cada decisão estruturante em uma frase, com o ADR que a detalha:
 - Essa gravação acontece **dentro** da transação que muda o status, de modo que
   o rollback do status implique o rollback do evento —
   [ADR-007](adrs/ADR-007-insercao-na-outbox-dentro-da-transacao.md).
-- O consumo é feito por um worker em processo separado da API, com entry-point
-  própria em `src/worker.ts` (novo) e cliente de banco próprio, lendo a outbox
-  por polling —
+- O consumo é feito por um worker em processo separado da API, com cliente de
+  banco próprio, lendo a outbox por polling —
   [ADR-002](adrs/ADR-002-worker-processo-separado-polling.md).
 - Entrega que falha entra numa política de retry finita com backoff exponencial e
   termina numa DLQ em tabela separada, com replay manual —
@@ -164,23 +163,28 @@ cliente.
 
 | ID | Questão | Por que ficou aberta | Quem levantou | Impacto se não resolver antes de codar |
 |---|---|---|---|---|
-| RFC-QA-01 | O identificador do cliente no cadastro de webhook vai no corpo ou no path da requisição | A fala fecha apenas o que ele **não** é (não vem do token) e oferece as duas formas sem eleger uma | `[09:32] Larissa` | Contrato público muda de forma; refazer depois é breaking change para os três clientes. **O FDD adota o path provisoriamente** (D-04) e a escolha continua aberta aqui |
-| RFC-QA-02 | Nome do arquivo que abriga a lógica de processamento do worker | Dois nomes foram oferecidos e o fechamento foi um aceno genérico, sem eleger um | `[09:28] Bruno` | Baixo tecnicamente, alto em confusão: o nome errado mistura processo e lógica. **O FDD adota um nome provisoriamente** (D-05) e a escolha continua aberta aqui |
-| RFC-QA-03 | Se haverá limitação de taxa de envio por cliente | A reunião tirou do escopo e, no mesmo movimento, pediu que ficasse registrado como ponto em aberto | `[09:39] Diego` | Um cliente com pico de mudanças de status pode ser inundado; sem decisão, o comportamento sob rajada é acidental, não projetado |
-| RFC-QA-04 | Garantia de ordenação quando houver mais de um worker | A perda da garantia foi reconhecida e a solução empurrada para o futuro, sem escolher entre particionamento e lock | `[09:12] Diego` | A limitação precisa estar documentada no contrato desde já; se não estiver, escalar workers vira quebra silenciosa de expectativa do cliente |
-| RFC-QA-05 | Qual é a política de retentativa, já que a ata tem três leituras incompatíveis | `[09:17] Larissa` fecha "5 tentativas"; `[09:17] Diego` enumera cinco intervalos (1m/5m/30m/2h/12h) e soma "quase 15 horas" — 5 chamadas têm 4 intervalos, e as três não fecham | `[09:17] Larissa` · `[09:17] Diego` | **O pacote adota 5 chamadas e 4 intervalos (1m/5m/30m/2h), última tentativa em 2h36min.** A leitura precisa de ratificação: ela reduz a cobertura de ~15h para 2h36min e deixa só 36 min de margem sobre a indisponibilidade de 2h de `[09:16] Diego` |
+| RFC-QA-01 | O identificador do cliente vai no corpo ou no path da requisição | A fala fecha só o que ele **não** é (não vem do token) e oferece as duas formas | `[09:32] Larissa` | Contrato público muda de forma; refazer depois é breaking change para os três clientes |
+| RFC-QA-02 | Nome do arquivo que abriga a lógica de processamento do worker | Dois nomes oferecidos, fechamento genérico, nenhum eleito | `[09:28] Bruno` | Baixo tecnicamente, alto em confusão: o nome errado mistura processo e lógica |
+| RFC-QA-03 | Se haverá limitação de taxa de envio por cliente | Tirada do escopo e, no mesmo movimento, registrada como ponto em aberto | `[09:39] Diego` | Sem decisão, o comportamento sob rajada é acidental, não projetado |
+| RFC-QA-04 | Garantia de ordenação quando houver mais de um worker | Perda reconhecida e solução adiada, sem escolher entre particionamento e lock | `[09:12] Diego` | Escalar workers vira quebra silenciosa de expectativa do cliente |
+| RFC-QA-05 | Política de retentativa, já que a ata tem três leituras incompatíveis | `[09:17] Larissa` fecha "5 tentativas"; `[09:17] Diego` dá cinco intervalos e soma "quase 15 horas" — 5 chamadas têm 4 | `[09:17] Larissa` · `[09:17] Diego` | O pacote adota 4 intervalos, última em 2h36; a leitura precisa de ratificação |
+| RFC-QA-06 | Como uma linha deixada em `PROCESSING` volta a ser lida depois de o worker cair | Sem lease, timeout de processamento ou reset no startup na ata. **Ameaça DEC-10** (`[09:26] Larissa`) | ninguém na reunião | Worker cai entre marcar `PROCESSING` e o `POST`: a linha nunca mais é lida |
+| RFC-QA-07 | Alcance real da perda de ordenação por `order_id` | **DEC-04** (`[09:13] Larissa`) a atribui a múltiplos workers; a seleção por `nextAttemptAt` a produz com um só | ninguém — alcance visto na análise do algoritmo | Evento em backoff é ultrapassado pelo seguinte do mesmo pedido |
+| RFC-QA-08 | Como a secret é guardada em repouso e quem gerencia a chave | A ata põe a secret na tabela (`[09:21] Bruno`) e não trata de protegê-la | ninguém na reunião | Dump do banco entrega todas as secrets; a assinatura deixa de provar origem |
+| RFC-QA-09 | Que restrições a url do cliente sofre além de exigir `https` | `[09:23] Sofia` fecha só o TLS; faixa de IP, loopback, DNS e redirects não foram citados | ninguém na reunião | Worker vira cliente HTTP para endereço interno escolhido por terceiro |
+| RFC-QA-10 | Colunas, nulabilidade, uniques e FKs dos três models além da outbox | A ata nomeia as tabelas, não o formato delas | ninguém na reunião | A migration não é escrevível a partir do texto |
+| RFC-QA-11 | Que transação e concorrência cercam `outbox → DLQ` e `DLQ → nova outbox` | A ata fecha a atomicidade de outra escrita (`[09:40] Bruno`) e não volta ao assunto | ninguém na reunião | Dois replays simultâneos duplicam o evento; falha no meio diverge as tabelas |
 
-`RFC-QA-01` e `RFC-QA-02` são as duas que o FDD resolve para poder escrever o
-contrato. Em ambos os casos a escolha do FDD é **provisória** e não fecha esta
-seção: se a revisão preferir a outra forma, o FDD muda e o RFC não.
+`RFC-QA-01` e `RFC-QA-02` são as duas que o FDD resolve **provisoriamente**
+para escrever o contrato. `RFC-QA-06` a `RFC-QA-11` não têm origem na reunião —
+é a definição delas — e estão no tracker em §Itens sem origem identificável.
 
 ## Impacto e riscos
 
 O que muda no sistema existente é pontual e crítico: a transação de mudança de
-status ganha mais uma escrita. Esse é o ponto de acoplamento e também o principal
-risco — um defeito ali não degrada webhooks, derruba mudança de status de pedido.
-A mitigação é a decisão de ADR-007, que isola a gravação numa função dedicada
-sem inverter dependências do serviço de pedidos.
+status ganha mais uma escrita. Um defeito ali não degrada webhooks, derruba
+mudança de status de pedido. Forma e mitigação estão em
+[ADR-007](adrs/ADR-007-insercao-na-outbox-dentro-da-transacao.md).
 
 O segundo risco é de premissa, não de código. A reunião trabalhou sobre um
 retrato do repositório que o disco só confirma em parte: a rota de consulta que

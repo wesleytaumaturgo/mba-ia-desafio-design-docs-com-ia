@@ -85,6 +85,56 @@ aqui como fronteira do escopo, sem ID de requisito:
 - Endurecimento do controle de acesso do CRUD de configuração de endpoint.
 - Limitação de taxa de envio por cliente.
 
+### Não decidido na reunião
+
+Os dez pontos abaixo **não foram objeto da reunião de [09:00]–[09:53]** — não
+foram recusados nem adiados, simplesmente não foram discutidos — e cada um
+precisa de decisão antes da implementação. Eles não têm ID de requisito porque
+não são requisitos: são a fronteira entre o que está decidido e o que ainda
+falta decidir. Preenchê-los aqui seria inventar decisão que ninguém tomou; o
+lugar delas é a pauta da próxima reunião, e as de peso arquitetural também estão
+em `docs/RFC.md` §Questões em aberto.
+
+- **Recuperação de linha em `PROCESSING` após queda do worker** — não há lease,
+  timeout de processamento nem reset no startup. Morde no at-least-once de
+  DEC-10: uma linha marcada e não entregue fica invisível para sempre (RFC-QA-06).
+  Decide: arquitetura.
+- **Alcance real da perda de ordenação por `order_id`** — DEC-04 atribui a perda
+  a múltiplos workers; a seleção por `nextAttemptAt` a produz com um worker só.
+  Morde na garantia de ordenação anunciada ao cliente (RFC-QA-07).
+  Decide: arquitetura.
+- **Armazenamento da secret em repouso e key management** — a ata põe a secret na
+  tabela e não diz como protegê-la. Morde na assinatura inteira: secret exposta
+  deixa de provar origem (RFC-QA-08). Decide: segurança.
+- **Encoding e canonicalização de `X-Signature`** — `[09:22] Sofia` fecha o
+  algoritmo e o objeto assinado ("o corpo do request"); hex ou base64, prefixo e
+  serialização exata dos bytes ficaram em aberto. Morde na interoperabilidade: o
+  cliente não consegue reproduzir a assinatura. Decide: segurança.
+- **Política anti-SSRF para a url informada pelo cliente** — a reunião exigiu só
+  `https`. Morde na superfície de saída: faixa de IP, loopback, resolução de DNS
+  e redirects não têm regra (RFC-QA-09). Decide: segurança.
+- **Ciclo de vida do `DELETE` de endpoint com eventos pendentes** — soft delete,
+  bloqueio, cancelamento das pendências e `onDelete` das chaves estrangeiras não
+  foram escolhidos. Morde na consistência entre configuração e fila.
+  Decide: produto, com arquitetura.
+- **Schema completo de `WebhookEndpoint`, `WebhookDelivery` e
+  `WebhookDeadLetter`** — este documento detalhou só `WebhookOutbox`; tipo,
+  tamanho, nulabilidade, uniques e relações dos outros três não têm origem. Morde
+  na migration, que não é escrevível a partir do texto (RFC-QA-10).
+  Decide: arquitetura.
+- **Atomicidade e concorrência de `outbox → DLQ` e `DLQ → nova outbox`** — não há
+  transação descrita para inserir na DLQ e marcar a origem, nem controle que
+  impeça dois replays simultâneos. Morde na duplicidade e na divergência entre as
+  duas tabelas (RFC-QA-11). Decide: arquitetura.
+- **Classificação de falha de entrega** — a reunião tratou falha permanente como
+  esgotamento de tentativas (`[09:15] Diego`); nenhuma fala distingue resposta
+  4xx definitiva de 5xx transitória. Morde no custo de retentar o que não se
+  recupera. Decide: arquitetura.
+- **Caminho para o operador descobrir o `:id` do replay** — nenhum dos sete
+  contratos expõe listagem da dead-letter queue. Morde na operabilidade de RF-08:
+  o endpoint de replay existe e não há como saber o que replayar.
+  Decide: produto.
+
 ## Fluxos detalhados
 
 ### Criação do evento na outbox
@@ -822,6 +872,8 @@ precisa considerar isso.
 | Cliente lento consome a janela de 10 segundos em toda tentativa | Alta | Baixo | Timeout fecha a tentativa; o backoff tira o endpoint lento do caminho dos demais |
 | Segundo pool de conexão do worker pressiona o MySQL (DIV-06) | Média | Médio | Dimensionamento explícito na configuração do processo novo, já que o projeto não configura pool hoje |
 | Contrato público muda se RFC-QA-01 for reaberta | Média | Médio | A forma provisória está marcada em todas as ocorrências; a mudança é de rota, não de payload |
+| Linha marcada `PROCESSING` fica invisível se o worker cair antes de concluir a entrega | Alta | **Alto** — fura o at-least-once de DEC-10, que é garantia anunciada ao cliente | Nenhuma mitigação técnica está escolhida, e escolher uma aqui seria inventá-la: lease, timeout de processamento e reset no startup são três caminhos que a reunião não discutiu. A mitigação é **decidir antes de implementar** (RFC-QA-06, §Não decidido na reunião) |
+| Ordenação por `order_id` quebra com um único worker, porque o evento em backoff sai do conjunto elegível e o seguinte o ultrapassa | Alta | Médio — cliente vê eventos do mesmo pedido fora de ordem, situação que DEC-04 atribuía só a múltiplos workers | Nenhuma solução escolhida. O alcance ampliado está declarado em ADR-002 §Consequências/Negativas; a mitigação é **decidir antes de implementar** se a ordenação por pedido é contrato ou best-effort (RFC-QA-07) |
 | Prazo de três sprints com dois dias úteis reservados para revisão de segurança (DEC-25, RNF-26, RNF-27) | Média | Médio | A revisão entra no fim do cronograma, como acordado; assinatura e redação de log são o que ela examina |
 
 ## Integração com o sistema existente
