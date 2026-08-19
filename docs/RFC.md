@@ -198,10 +198,12 @@ reunião (DIV-12). O pacote de eventos, portanto, precisa dizer explicitamente
 quais transições emitem evento — o padrão silencioso seria emitir menos do que o
 cliente espera.
 
-As divergências restantes entre fala e disco são de vocabulário de campo e de
-uniformidade do padrão de identificador (DIV-01, DIV-02, DIV-03, DIV-10): não
-mudam a arquitetura, mas obrigam o FDD a traduzir explicitamente os nomes ditos
-na reunião para os que existem no schema.
+Os pontos restantes não são defeito, são fronteira. O vocabulário de campo que a
+reunião falou é o do **contrato público**, que fica em snake_case por decisão; o
+schema interno é camelCase (DIV-01, DIV-02, DIV-03). Nada a conciliar: o FDD
+declara o mapeamento campo a campo, e nenhum documento afirma nome de coluna. Já
+o padrão de identificador do projeto não é universal (DIV-10) — vale para quase
+todos os modelos, não para todos, e é o FDD que registra a exceção.
 
 A equipe assume: que o volume cabe em um worker único; que polling num banco
 relacional atende a régua de dez segundos; e que o cliente implementa

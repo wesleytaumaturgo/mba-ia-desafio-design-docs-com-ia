@@ -262,3 +262,37 @@ invertem nada; o tracker no fim é escolha justificada.
 
 O tracker fica no fim, e não em paralelo, porque varredura sobre texto congelado
 é verificável; em paralelo produz drift entre tracker e documento.
+
+---
+
+## 10 · Precedência disco × fala (D-09) e roteamento das divergências
+
+**D-09 — Onde a transcrição e o código divergirem, o documento segue o CÓDIGO e
+nomeia a divergência.** O critério GER-1 reprova documento que contradiga a
+transcrição *ou* o código; com os dois em conflito, a única saída que não
+contradiz nenhum é afirmar o que o disco mostra e registrar o que foi dito.
+Nenhuma divergência é silenciada, nenhuma é "conciliada" reescrevendo a fala.
+
+**D-10 — Payload em snake_case, por decisão.** A reunião especificou `order_id`,
+`order_number`, `total_cents` (RF-09, RF-10); o schema Prisma usa camelCase
+(DIV-01, DIV-02, DIV-03). Não é contradição: o payload é contrato público e o
+schema é interno. O FDD declara o mapeamento campo a campo em §Contratos
+públicos. Nenhum documento afirma que a coluna se chama `total_cents`.
+
+| DIV | Destino obrigatório | Como entra |
+|---|---|---|
+| DIV-01, 02, 03 | FDD §Contratos públicos + §Integração | tabela de mapeamento payload ↔ coluna Prisma, por D-10 |
+| DIV-04 | ADR-007 §Contexto — feito | a transação não é uniforme; a inserção na outbox precisa ser incondicional |
+| DIV-05 | ADR-001 §Alternativas — feito | a alternativa "trigger de banco" não existe no repo hoje |
+| DIV-06 | ADR-002 §Consequências/Negativas — feito | o worker precisa de config que a reunião presumiu pronta |
+| DIV-07 | ADR-008 §Contexto — feito | o código confirma DEC-17: `customer_id` não poderia vir do JWT |
+| DIV-08 | PRD §Problema e motivação · já no RFC §Contexto | a premissa do polling, com a ressalva do disco |
+| DIV-09 | ADR-006 §Contexto — feito | "reuso do padrão" tem exceção precedente (módulo auth) |
+| DIV-10 | FDD §Dependências e compatibilidade | DEC-26 (UUID) vale para 6 de 7 models |
+| DIV-11 | ADR-007 §Consequências/Negativas — feito | cobertura da feature tem buraco declarado |
+| DIV-12 | FDD §Fluxos detalhados | DEC-18 filtra na inserção; o conjunto filtrável é o enum real de 6 valores |
+| DIV-13 | ADR-006 §Contexto — feito | Pino está em 3 arquivos, não "no projeto inteiro" |
+| DIV-14 | ADR-001 §Consequências/Negativas — feito | primeiro uso do padrão outbox no projeto |
+
+As 14 divergências alimentam também o README §Iterações e ajustes, que exige ≥2
+correções concretas — aqui há 14, cada uma com `arquivo:linha`.
