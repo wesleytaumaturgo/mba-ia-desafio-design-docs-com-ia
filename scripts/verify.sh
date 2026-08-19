@@ -1,6 +1,21 @@
 #!/usr/bin/env bash
-# verify.sh v3.1 — cobre INV-1..INV-4 (invariantes) e ADR-1..ADR-4 + EST-2 (bloco 4).
+# verify.sh v4 — cobre INV-1..INV-4 (invariantes), ADR-1..ADR-4 + EST-2 (bloco 4)
+# e RFC-1..RFC-6 (bloco 5).
 # Ver .planning/01-matriz.md para o restante dos critérios de aceite e seus blocos.
+#
+# v4 (2026-08-19) acrescenta os seis checks do RFC:
+#   RFC-1 existência, tamanho mínimo e ausência de placeholder ·
+#   RFC-2 as 8 seções canônicas + revisores conferíveis na transcrição ·
+#   RFC-3 alternativas descartadas com trade-off · RFC-4 questões em aberto ·
+#   RFC-5 links de ADR resolvíveis · RFC-6 teto de palavras e ausência de
+#   detalhe de FDD. Os seis leem $RFC_FILE (default docs/RFC.md), parametrizável
+#   para que os testes negativos rodem contra uma cópia sob /tmp — ver
+#   .planning/05-teste-negativo.md.
+#   O denominador do RFC-2 (a lista de 8 headers) é digitado à mão a partir de
+#   .planning/03-design.md §6, NUNCA extraído do próprio RFC: um denominador
+#   lido do arquivo medido mede consistência do arquivo consigo mesmo.
+#   Os links do RFC-5 são resolvidos contra docs/ (C-6), e não contra o
+#   diretório da cópia, para que a sabotagem de link seja a única variável.
 #
 # v3.1 (2026-08-19) reescreve o ADR-3 com denominador EXTERNO aos ADRs:
 #   as 6 decisões principais do enunciado e suas âncoras provadas vêm de
@@ -77,11 +92,12 @@ git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null \
   || erro "\$BASE não resolve para um commit: '$BASE'"
 
 ADR_DIR="${ADR_DIR:-docs/adrs}"
+RFC_FILE="${RFC_FILE:-docs/RFC.md}"
 
 pass=0
-total=9
+total=15
 
-echo "verify.sh v3.1 — BASE=$BASE"
+echo "verify.sh v4 — BASE=$BASE"
 echo "engine: $GREP $GREP_VER"
 echo
 
@@ -387,6 +403,196 @@ if [ -z "$est2_violacoes" ]; then
 else
   echo "EST-2 FALHA — entrada(s) fora do permitido (ADR-NNN-*.md, README.md) em $ADR_DIR:"
   printf '%s' "$est2_violacoes"
+fi
+
+# ===========================================================================
+# Bloco 5 — RFC-1..RFC-6 sobre $RFC_FILE.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# RFC-1: o arquivo existe, tem no mínimo 900 palavras e não sobrou placeholder
+# do esqueleto.
+# ---------------------------------------------------------------------------
+rfc_existe=0
+[ -f "$RFC_FILE" ] && rfc_existe=1
+
+rfc1_palavras=0
+rfc1_placeholder=0
+if [ "$rfc_existe" -eq 1 ]; then
+  rfc1_palavras="$(wc -w < "$RFC_FILE" | tr -d ' ')" \
+    || erro "RFC-1 não conseguiu contar palavras de $RFC_FILE"
+  rfc1_placeholder="$("$GREP" -cE '<!--.*(a ser elaborado|será preenchido).*-->' "$RFC_FILE" || true)"
+fi
+
+if [ "$rfc_existe" -eq 1 ] && [ "$rfc1_palavras" -ge 900 ] && [ "$rfc1_placeholder" -eq 0 ]; then
+  echo "RFC-1 OK — $RFC_FILE existe, $rfc1_palavras palavras (mínimo 900), $rfc1_placeholder placeholder(s) do esqueleto"
+  pass=$((pass + 1))
+elif [ "$rfc_existe" -eq 0 ]; then
+  echo "RFC-1 FALHA — $RFC_FILE não existe"
+else
+  echo "RFC-1 FALHA — $rfc1_palavras palavras (mínimo 900) e $rfc1_placeholder placeholder(s) '<!-- ... a ser elaborado / será preenchido ... -->' (exigido: 0) em $RFC_FILE"
+fi
+
+# Sem arquivo, RFC-2..RFC-6 não medem nada — passagem vazia sai por exit 2, e
+# não por uma sequência de OK ou de FALHA que fingiria ter medido.
+[ "$rfc_existe" -eq 1 ] || erro "RFC-2..RFC-6 não têm o que medir: $RFC_FILE ausente"
+
+# ---------------------------------------------------------------------------
+# RFC-2: as 8 seções canônicas de .planning/03-design.md §6, header literal, e
+# a seção de Metadados com pelo menos 3 revisores conferíveis em TRANSCRICAO.md.
+#
+# A lista de 8 headers abaixo é o denominador e é digitada à mão a partir de
+# §6 — extraí-la do próprio RFC mediria o arquivo contra ele mesmo.
+# ---------------------------------------------------------------------------
+rfc2_headers=(
+  "## Metadados"
+  "## Resumo executivo (TL;DR)"
+  "## Contexto e problema"
+  "## Proposta técnica"
+  "## Alternativas consideradas"
+  "## Questões em aberto"
+  "## Impacto e riscos"
+  "## Decisões relacionadas"
+)
+# Denominador adulterado (header somado ou removido do array) sai por exit 2.
+[ "${#rfc2_headers[@]}" -eq 8 ] \
+  || erro "RFC-2 carregou ${#rfc2_headers[@]} header(s) no denominador — §6 de .planning/03-design.md tem exatamente 8"
+
+rfc2_ausentes=""
+rfc2_conferidos=0
+for _h in "${rfc2_headers[@]}"; do
+  rfc2_conferidos=$((rfc2_conferidos + 1))
+  "$GREP" -qxF "$_h" "$RFC_FILE" || rfc2_ausentes+="  header ausente: '$_h'"$'\n'
+done
+
+# Revisores: nome que aparece na seção ## Metadados E é encontrado por grep -F
+# em TRANSCRICAO.md. O denominador dos nomes vem de .planning/03-design.md §2 D-07.
+TRANSCRICAO="TRANSCRICAO.md"
+[ -r "$TRANSCRICAO" ] || erro "RFC-2 não consegue ler $TRANSCRICAO para conferir os revisores"
+rfc2_nomes=(Bruno Diego Larissa Marcos Sofia)
+[ "${#rfc2_nomes[@]}" -eq 5 ] \
+  || erro "RFC-2 carregou ${#rfc2_nomes[@]} nome(s) de revisor — D-07 fixa 5"
+
+rfc2_secao="$(awk '/^## Metadados$/ {f=1; next} /^## / {f=0} f' "$RFC_FILE")"
+# Seção vazia: o check não mediu nada e não pode imprimir OK por omissão.
+[ -n "$rfc2_secao" ] || erro "RFC-2 encontrou a seção '## Metadados' vazia (ou ausente) em $RFC_FILE"
+
+rfc2_revisores=0
+rfc2_revisores_ids=""
+for _n in "${rfc2_nomes[@]}"; do
+  printf '%s\n' "$rfc2_secao" | "$GREP" -qF "$_n" || continue
+  "$GREP" -qF "$_n" "$TRANSCRICAO" || continue
+  rfc2_revisores=$((rfc2_revisores + 1))
+  rfc2_revisores_ids+=" $_n"
+done
+
+if [ -z "$rfc2_ausentes" ] && [ "$rfc2_revisores" -ge 3 ]; then
+  echo "RFC-2 OK — $rfc2_conferidos headers canônicos conferidos, 0 ausentes; $rfc2_revisores revisores em §Metadados achados por grep -F em $TRANSCRICAO (mínimo 3):$rfc2_revisores_ids"
+  pass=$((pass + 1))
+else
+  echo "RFC-2 FALHA — $rfc2_conferidos headers conferidos, $rfc2_revisores revisor(es) conferível(is) em $TRANSCRICAO (mínimo 3):$rfc2_revisores_ids"
+  printf '%s' "$rfc2_ausentes"
+fi
+
+# ---------------------------------------------------------------------------
+# RFC-3: pelo menos 2 alternativas descartadas, cada uma com a linha
+# '**Trade-off do descarte:**' seguida de conteúdo não vazio.
+#
+# O awk devolve uma linha por bloco: ID <TAB> marcador achado <TAB> conteúdo
+# não vazio depois do marcador. Um bloco só conta como íntegro com os dois.
+# ---------------------------------------------------------------------------
+rfc3_blocos="$(awk '
+  function flush() { if (id != "") printf "%s\t%d\t%d\n", id, marca, conteudo }
+  /^### RFC-ALT-[0-9][0-9]/ { flush(); id=$2; marca=0; conteudo=0; next }
+  /^#/                      { flush(); id=""; next }
+  id != "" {
+    if (index($0, "**Trade-off do descarte:**") == 1) {
+      marca = 1
+      resto = substr($0, length("**Trade-off do descarte:**") + 1)
+      gsub(/^[ \t]+|[ \t]+$/, "", resto)
+      if (length(resto) > 0) conteudo = 1
+      next
+    }
+    if (marca == 1 && conteudo == 0 && NF > 0) conteudo = 1
+  }
+  END { flush() }
+' "$RFC_FILE")"
+
+rfc3_n=0
+rfc3_ok=0
+rfc3_violacoes=""
+while IFS=$'\t' read -r _id _marca _conteudo; do
+  [ -n "$_id" ] || continue
+  rfc3_n=$((rfc3_n + 1))
+  if [ "$_marca" -eq 0 ]; then
+    rfc3_violacoes+="  $_id — sem a linha '**Trade-off do descarte:**'"$'\n'
+  elif [ "$_conteudo" -eq 0 ]; then
+    rfc3_violacoes+="  $_id — '**Trade-off do descarte:**' sem conteúdo"$'\n'
+  else
+    rfc3_ok=$((rfc3_ok + 1))
+  fi
+done <<< "$rfc3_blocos"
+
+if [ "$rfc3_ok" -ge 2 ] && [ -z "$rfc3_violacoes" ]; then
+  echo "RFC-3 OK — $rfc3_n blocos '### RFC-ALT-NN' examinados, $rfc3_ok com trade-off do descarte preenchido (mínimo 2)"
+  pass=$((pass + 1))
+else
+  echo "RFC-3 FALHA — $rfc3_n blocos '### RFC-ALT-NN' examinados, $rfc3_ok íntegro(s) (mínimo 2)"
+  printf '%s' "$rfc3_violacoes"
+fi
+
+# ---------------------------------------------------------------------------
+# RFC-4: pelo menos 2 linhas de tabela com ID RFC-QA-NN.
+# ---------------------------------------------------------------------------
+rfc4_n="$("$GREP" -cE '^\| *RFC-QA-[0-9]{2} *\|' "$RFC_FILE" || true)"
+if [ "$rfc4_n" -ge 2 ]; then
+  echo "RFC-4 OK — $rfc4_n linhas '| RFC-QA-NN |' em $RFC_FILE (mínimo 2)"
+  pass=$((pass + 1))
+else
+  echo "RFC-4 FALHA — $rfc4_n linha(s) '| RFC-QA-NN |' em $RFC_FILE (mínimo 2)"
+fi
+
+# ---------------------------------------------------------------------------
+# RFC-5: os links relativos de ADR (C-6) resolvem para arquivo existente.
+# A resolução é sempre contra docs/, o diretório canônico do RFC — não contra o
+# diretório de $RFC_FILE — para que a cópia sob /tmp dos testes negativos
+# mantenha o link quebrado como única variável.
+# ---------------------------------------------------------------------------
+rfc5_distintos=0
+rfc5_quebrados=0
+rfc5_lista=""
+while IFS= read -r _l; do
+  [ -n "$_l" ] || continue
+  rfc5_distintos=$((rfc5_distintos + 1))
+  if [ -f "docs/$_l" ]; then
+    rfc5_lista+=" ${_l##*/}"
+  else
+    rfc5_quebrados=$((rfc5_quebrados + 1))
+    rfc5_lista+=" ${_l##*/}(QUEBRADO)"
+  fi
+done < <("$GREP" -ohE '\]\(adrs/ADR-[^)]*\.md\)' "$RFC_FILE" \
+           | sed -E 's/^\]\(//; s/\)$//' | sort -u)
+
+if [ "$rfc5_distintos" -ge 2 ] && [ "$rfc5_quebrados" -eq 0 ]; then
+  echo "RFC-5 OK — $rfc5_distintos links '](adrs/ADR-*.md)' distintos (mínimo 2), $rfc5_quebrados quebrado(s), resolvidos contra docs/"
+  pass=$((pass + 1))
+else
+  echo "RFC-5 FALHA — $rfc5_distintos link(s) distinto(s) (mínimo 2), $rfc5_quebrados quebrado(s) contra docs/:$rfc5_lista"
+fi
+
+# ---------------------------------------------------------------------------
+# RFC-6: teto de palavras (INV-8) e ausência de detalhe que pertence ao FDD —
+# código de erro do módulo, fence json e tabela de endpoint. Ver §5 do design.
+# ---------------------------------------------------------------------------
+rfc6_palavras="$rfc1_palavras"
+rfc6_fdd="$("$GREP" -cE 'WEBHOOK_[A-Z]|^```json|^\| *(GET|POST|PUT|PATCH|DELETE) ' "$RFC_FILE" || true)"
+
+if [ "$rfc6_palavras" -ge 900 ] && [ "$rfc6_palavras" -le 2200 ] && [ "$rfc6_fdd" -eq 0 ]; then
+  echo "RFC-6 OK — $rfc6_palavras palavras na faixa 900–2200, $rfc6_fdd linha(s) de detalhe de FDD em 3 padrões conferidos"
+  pass=$((pass + 1))
+else
+  echo "RFC-6 FALHA — $rfc6_palavras palavras (faixa 900–2200) e $rfc6_fdd linha(s) de detalhe de FDD (exigido: 0) em $RFC_FILE"
+  "$GREP" -nE 'WEBHOOK_[A-Z]|^```json|^\| *(GET|POST|PUT|PATCH|DELETE) ' "$RFC_FILE" | sed 's/^/  /' || true
 fi
 
 echo
