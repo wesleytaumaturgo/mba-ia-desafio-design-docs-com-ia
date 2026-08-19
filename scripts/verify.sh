@@ -1,7 +1,19 @@
 #!/usr/bin/env bash
-# verify.sh v4 — cobre INV-1..INV-4 (invariantes), ADR-1..ADR-4 + EST-2 (bloco 4)
-# e RFC-1..RFC-6 (bloco 5).
+# verify.sh v5 — cobre INV-1..INV-4 (invariantes), ADR-1..ADR-4 + EST-2 (bloco 4),
+# RFC-1..RFC-6 (bloco 5) e FDD-1..FDD-7 (bloco 6).
 # Ver .planning/01-matriz.md para o restante dos critérios de aceite e seus blocos.
+#
+# v5 (2026-08-19) acrescenta os sete checks do FDD:
+#   FDD-1 existência, tamanho mínimo e ausência de placeholder ·
+#   FDD-2 os 12 headers canônicos · FDD-3 endpoints com request/response/status ·
+#   FDD-4 matriz de erros com prefixo WEBHOOK_ e zero código sem prefixo ·
+#   FDD-5 caminhos reais na §Integração · FDD-6 Métricas/Logs/Tracing com itens ·
+#   FDD-7 invariante de D-10 (nenhum dos cinco termos snake_case afirmado como
+#   nome de coluna fora da subseção de mapeamento). Os sete leem $FDD_FILE
+#   (default docs/FDD.md), parametrizável para que os testes negativos rodem
+#   contra uma cópia sob /tmp — ver .planning/06-teste-negativo.md.
+#   O denominador do FDD-2 (a lista de 12 headers) é digitado à mão a partir de
+#   .planning/03-design.md §6, NUNCA extraído do próprio FDD.
 #
 # v4 (2026-08-19) acrescenta os seis checks do RFC:
 #   RFC-1 existência, tamanho mínimo e ausência de placeholder ·
@@ -93,11 +105,12 @@ git rev-parse --verify --quiet "${BASE}^{commit}" >/dev/null \
 
 ADR_DIR="${ADR_DIR:-docs/adrs}"
 RFC_FILE="${RFC_FILE:-docs/RFC.md}"
+FDD_FILE="${FDD_FILE:-docs/FDD.md}"
 
 pass=0
-total=15
+total=22
 
-echo "verify.sh v4 — BASE=$BASE"
+echo "verify.sh v5 — BASE=$BASE"
 echo "engine: $GREP $GREP_VER"
 echo
 
@@ -593,6 +606,261 @@ if [ "$rfc6_palavras" -ge 900 ] && [ "$rfc6_palavras" -le 2200 ] && [ "$rfc6_fdd
 else
   echo "RFC-6 FALHA — $rfc6_palavras palavras (faixa 900–2200) e $rfc6_fdd linha(s) de detalhe de FDD (exigido: 0) em $RFC_FILE"
   "$GREP" -nE 'WEBHOOK_[A-Z]|^```json|^\| *(GET|POST|PUT|PATCH|DELETE) ' "$RFC_FILE" | sed 's/^/  /' || true
+fi
+
+# ===========================================================================
+# Bloco 6 — FDD-1..FDD-7 sobre $FDD_FILE.
+# ===========================================================================
+
+# ---------------------------------------------------------------------------
+# FDD-1: o arquivo existe, tem no mínimo 1500 palavras e não sobrou placeholder
+# do esqueleto.
+# ---------------------------------------------------------------------------
+fdd_existe=0
+[ -f "$FDD_FILE" ] && fdd_existe=1
+
+fdd1_palavras=0
+fdd1_placeholder=0
+if [ "$fdd_existe" -eq 1 ]; then
+  fdd1_palavras="$(wc -w < "$FDD_FILE" | tr -d ' ')" \
+    || erro "FDD-1 não conseguiu contar palavras de $FDD_FILE"
+  fdd1_placeholder="$("$GREP" -cE '<!--.*(a ser elaborado|será preenchido).*-->' "$FDD_FILE" || true)"
+fi
+
+if [ "$fdd_existe" -eq 1 ] && [ "$fdd1_palavras" -ge 1500 ] && [ "$fdd1_placeholder" -eq 0 ]; then
+  echo "FDD-1 OK — $FDD_FILE existe, $fdd1_palavras palavras (mínimo 1500), $fdd1_placeholder placeholder(s) do esqueleto"
+  pass=$((pass + 1))
+elif [ "$fdd_existe" -eq 0 ]; then
+  echo "FDD-1 FALHA — $FDD_FILE não existe"
+else
+  echo "FDD-1 FALHA — $fdd1_palavras palavras (mínimo 1500) e $fdd1_placeholder placeholder(s) '<!-- ... a ser elaborado / será preenchido ... -->' (exigido: 0) em $FDD_FILE"
+fi
+
+# Sem arquivo, FDD-2..FDD-7 não medem nada — passagem vazia sai por exit 2.
+[ "$fdd_existe" -eq 1 ] || erro "FDD-2..FDD-7 não têm o que medir: $FDD_FILE ausente"
+
+# ---------------------------------------------------------------------------
+# FDD-2: as 12 seções canônicas de .planning/03-design.md §6, header literal.
+#
+# A lista abaixo é o denominador e é digitada à mão a partir de §6 — extraí-la
+# do próprio FDD mediria o arquivo contra ele mesmo.
+# ---------------------------------------------------------------------------
+fdd2_headers=(
+  "## Contexto e motivação técnica"
+  "## Objetivos técnicos"
+  "## Escopo e exclusões"
+  "## Fluxos detalhados"
+  "## Contratos públicos"
+  "## Matriz de erros"
+  "## Estratégias de resiliência"
+  "## Observabilidade"
+  "## Dependências e compatibilidade"
+  "## Critérios de aceite técnicos"
+  "## Riscos e mitigação"
+  "## Integração com o sistema existente"
+)
+# Denominador adulterado (header somado ou removido do array) sai por exit 2.
+[ "${#fdd2_headers[@]}" -eq 12 ] \
+  || erro "FDD-2 carregou ${#fdd2_headers[@]} header(s) no denominador — §6 de .planning/03-design.md tem exatamente 12 headers '## ' para o FDD"
+
+fdd2_ausentes=""
+fdd2_conferidos=0
+for _h in "${fdd2_headers[@]}"; do
+  fdd2_conferidos=$((fdd2_conferidos + 1))
+  "$GREP" -qxF "$_h" "$FDD_FILE" || fdd2_ausentes+="  header ausente: '$_h'"$'\n'
+done
+
+if [ -z "$fdd2_ausentes" ]; then
+  echo "FDD-2 OK — $fdd2_conferidos headers canônicos conferidos em $FDD_FILE, 0 ausentes"
+  pass=$((pass + 1))
+else
+  echo "FDD-2 FALHA — $fdd2_conferidos headers conferidos, $(printf '%s' "$fdd2_ausentes" | "$GREP" -c .) ausente(s):"
+  printf '%s' "$fdd2_ausentes"
+fi
+
+# ---------------------------------------------------------------------------
+# FDD-3: pelo menos 4 blocos '### MÉTODO /path' e, em CADA bloco, no mínimo dois
+# fences ```json (request e response) e ao menos uma linha '**Status:** NNN'.
+# O bloco vai do header do endpoint até o próximo header de qualquer nível.
+# A exigência é por bloco: um endpoint incompleto reprova mesmo que sobrem
+# quatro completos (mesma leitura provada em S3 do bloco 5).
+# ---------------------------------------------------------------------------
+fdd3_blocos="$(awk '
+  function flush() { if (id != "") printf "%s\t%d\t%d\n", id, fences, status }
+  /^### (GET|POST|PUT|PATCH|DELETE) \// { flush(); id=$2" "$3; fences=0; status=0; next }
+  /^#/                                  { flush(); id=""; next }
+  id != "" {
+    if ($0 ~ /^```json/)                     fences++
+    if ($0 ~ /\*\*Status:\*\* *[0-9][0-9][0-9]/) status++
+  }
+  END { flush() }
+' "$FDD_FILE")"
+
+fdd3_n=0
+fdd3_ok=0
+fdd3_violacoes=""
+while IFS=$'\t' read -r _id _fences _status; do
+  [ -n "$_id" ] || continue
+  fdd3_n=$((fdd3_n + 1))
+  if [ "$_fences" -lt 2 ]; then
+    fdd3_violacoes+="  $_id — $_fences fence(s) \`\`\`json (mínimo 2)"$'\n'
+  elif [ "$_status" -lt 1 ]; then
+    fdd3_violacoes+="  $_id — nenhuma linha '**Status:** NNN'"$'\n'
+  else
+    fdd3_ok=$((fdd3_ok + 1))
+  fi
+done <<< "$fdd3_blocos"
+
+if [ "$fdd3_ok" -ge 4 ] && [ -z "$fdd3_violacoes" ]; then
+  echo "FDD-3 OK — $fdd3_n blocos '### MÉTODO /path' examinados, $fdd3_ok com ≥2 fences \`\`\`json e ≥1 '**Status:** NNN' (mínimo 4)"
+  pass=$((pass + 1))
+else
+  echo "FDD-3 FALHA — $fdd3_n blocos '### MÉTODO /path' examinados, $fdd3_ok íntegro(s) (mínimo 4)"
+  printf '%s' "$fdd3_violacoes"
+fi
+
+# ---------------------------------------------------------------------------
+# FDD-4: dentro da §Matriz de erros, pelo menos 8 linhas de tabela cujo campo de
+# CÓDIGO casa WEBHOOK_[A-Z_]{3,} e ZERO código de erro sem o prefixo (C-5,
+# DEC-13).
+#
+# Nota de leitura: o formato da matriz fixado pelo bloco é
+# '| ID (FDD-ERR-NN) | Código | HTTP | ...', então o campo de código é a 2a
+# célula, não a 1a. É esse campo que C-5 chama de "primeira coluna da matriz" —
+# a coluna de ID é rastreabilidade (C-2), não código de erro.
+#
+# A segunda perna varre a seção inteira à procura de token SCREAMING_SNAKE que
+# não comece com WEBHOOK_: é o que pega um código de erro do módulo escrito sem
+# o prefixo, esteja ele em linha de tabela ou em prosa.
+# ---------------------------------------------------------------------------
+fdd4_secao="$(awk '/^## Matriz de erros$/ {f=1; next} /^## / {f=0} f' "$FDD_FILE")"
+# Seção vazia: o check não mediu nada e não pode imprimir OK por omissão.
+[ -n "$fdd4_secao" ] || erro "FDD-4 encontrou a seção '## Matriz de erros' vazia (ou ausente) em $FDD_FILE"
+
+fdd4_com_prefixo="$(printf '%s\n' "$fdd4_secao" \
+  | awk -F'|' '/^\| *FDD-ERR-[0-9][0-9] *\|/ {
+      gsub(/^[ \t]+|[ \t]+$/, "", $3)
+      # o mawk desta máquina não implementa intervalo {n,}; [A-Z_][A-Z_][A-Z_]+
+      # é a forma equivalente de "no mínimo 3" e roda em qualquer awk.
+      if ($3 ~ /^WEBHOOK_[A-Z_][A-Z_][A-Z_]+$/) c++
+    } END { print c+0 }')"
+
+fdd4_sem_prefixo="$(printf '%s\n' "$fdd4_secao" \
+  | "$GREP" -oE '\b[A-Z][A-Z0-9]*(_[A-Z0-9]+)+\b' \
+  | "$GREP" -vE '^WEBHOOK_' | sort -u || true)"
+fdd4_n_sem="$(printf '%s' "$fdd4_sem_prefixo" | "$GREP" -c . || true)"
+
+if [ "$fdd4_com_prefixo" -ge 8 ] && [ "$fdd4_n_sem" -eq 0 ]; then
+  echo "FDD-4 OK — $fdd4_com_prefixo linhas '| FDD-ERR-NN |' com código WEBHOOK_[A-Z_]{3,} na §Matriz de erros (mínimo 8), $fdd4_n_sem código(s) sem o prefixo"
+  pass=$((pass + 1))
+else
+  echo "FDD-4 FALHA — $fdd4_com_prefixo linha(s) com código WEBHOOK_ (mínimo 8) e $fdd4_n_sem código(s) sem o prefixo (exigido: 0) na §Matriz de erros de $FDD_FILE"
+  [ "$fdd4_n_sem" -gt 0 ] && printf '%s\n' "$fdd4_sem_prefixo" | sed 's/^/  sem prefixo: /'
+fi
+
+# ---------------------------------------------------------------------------
+# FDD-5: os caminhos citados em crase na §Integração com o sistema existente,
+# descontados os marcados (novo) por C-1, existem no índice do git: pelo menos
+# 4 distintos e ZERO ausentes.
+# ---------------------------------------------------------------------------
+fdd5_secao="$(awk '/^## Integração com o sistema existente$/ {f=1; next} /^## / {f=0} f' "$FDD_FILE")"
+[ -n "$fdd5_secao" ] || erro "FDD-5 encontrou a seção '## Integração com o sistema existente' vazia (ou ausente) em $FDD_FILE"
+
+fdd5_distintos=0
+fdd5_existentes=0
+fdd5_ausentes=""
+while IFS= read -r _p; do
+  [ -n "$_p" ] || continue
+  fdd5_distintos=$((fdd5_distintos + 1))
+  if git ls-files --error-unmatch "$_p" >/dev/null 2>&1; then
+    fdd5_existentes=$((fdd5_existentes + 1))
+  else
+    fdd5_ausentes+="  ausente do índice do git e sem o marcador (novo): $_p"$'\n'
+  fi
+done < <(printf '%s\n' "$fdd5_secao" \
+           | "$GREP" -ohE '`[A-Za-z0-9_./-]+\.(ts|js|prisma|json|sql|yml|yaml)`( *\(novo\))?' \
+           | "$GREP" -v '(novo)' | tr -d '`' | sort -u)
+
+# Passagem vazia: seção sem nenhum caminho em crase não prova integração nenhuma.
+[ "$fdd5_distintos" -gt 0 ] || erro "FDD-5 não encontrou nenhum caminho em crase na §Integração de $FDD_FILE — nada foi medido"
+
+if [ "$fdd5_existentes" -ge 4 ] && [ -z "$fdd5_ausentes" ]; then
+  echo "FDD-5 OK — $fdd5_distintos caminhos distintos sem (novo) na §Integração, $fdd5_existentes presentes em git ls-files (mínimo 4), 0 ausentes"
+  pass=$((pass + 1))
+else
+  echo "FDD-5 FALHA — $fdd5_distintos caminho(s) distinto(s) sem (novo), $fdd5_existentes presente(s) em git ls-files (mínimo 4):"
+  printf '%s' "$fdd5_ausentes"
+fi
+
+# ---------------------------------------------------------------------------
+# FDD-6: '### Métricas', '### Logs' e '### Tracing' presentes, com pelo menos 3
+# itens de lista cada. Item de lista = linha começando com '- ' ou '* ',
+# contada até o próximo header de qualquer nível.
+# ---------------------------------------------------------------------------
+fdd6_subs=("### Métricas" "### Logs" "### Tracing")
+[ "${#fdd6_subs[@]}" -eq 3 ] \
+  || erro "FDD-6 carregou ${#fdd6_subs[@]} subseção(ões) no denominador — §6 de .planning/03-design.md fixa 3"
+
+fdd6_violacoes=""
+fdd6_conferidos=0
+fdd6_itens_total=0
+for _sub in "${fdd6_subs[@]}"; do
+  fdd6_conferidos=$((fdd6_conferidos + 1))
+  if ! "$GREP" -qxF "$_sub" "$FDD_FILE"; then
+    fdd6_violacoes+="  subseção ausente: '$_sub'"$'\n'
+    continue
+  fi
+  _n_itens="$(awk -v h="$_sub" '$0==h {f=1; next} /^#/ {f=0} f && /^[-*] / {c++} END {print c+0}' "$FDD_FILE")"
+  fdd6_itens_total=$((fdd6_itens_total + _n_itens))
+  [ "$_n_itens" -ge 3 ] || fdd6_violacoes+="  '$_sub' — $_n_itens item(ns) de lista (mínimo 3)"$'\n'
+done
+
+if [ -z "$fdd6_violacoes" ]; then
+  echo "FDD-6 OK — $fdd6_conferidos subseções de §Observabilidade conferidas, $fdd6_itens_total itens de lista no total, mínimo 3 em cada"
+  pass=$((pass + 1))
+else
+  echo "FDD-6 FALHA — $fdd6_conferidos subseções conferidas em $FDD_FILE:"
+  printf '%s' "$fdd6_violacoes"
+fi
+
+# ---------------------------------------------------------------------------
+# FDD-7: invariante de D-10 — nenhuma linha do FDD afirma que a COLUNA se chama
+# total_cents, order_number, from_status, to_status ou stock_quantity. Esses
+# cinco são vocabulário do payload (contrato público, snake_case); o schema é
+# camelCase e a tradução vive só em '### Mapeamento payload ↔ schema'.
+#
+# Implementação deliberadamente estreita, para não gerar falso positivo: proíbe
+# a construção "coluna | campo do schema | no banco" a menos de 40 caracteres de
+# um dos cinco termos, nos dois sentidos. Ficam fora da varredura a subseção de
+# mapeamento (onde a correspondência é o assunto) e o conteúdo de qualquer fence
+# de código (onde o termo é o nome do campo JSON, não uma afirmação sobre o
+# schema).
+# ---------------------------------------------------------------------------
+FDD7_TERMOS='total_cents|order_number|from_status|to_status|stock_quantity'
+FDD7_SCHEMA='coluna|campo do schema|no banco'
+
+fdd7_varridas="$(awk '
+  /^### Mapeamento payload/ { map=1; next }
+  /^#/                      { map=0 }
+  /^```/                    { fence = !fence; next }
+  map || fence              { next }
+  { printf "%d:%s\n", FNR, $0 }
+' "$FDD_FILE")"
+
+fdd7_n_varridas="$(printf '%s' "$fdd7_varridas" | "$GREP" -c . || true)"
+# Passagem vazia: se a exclusão comeu o documento inteiro, o check não mediu nada.
+[ "$fdd7_n_varridas" -gt 0 ] || erro "FDD-7 não varreu nenhuma linha de $FDD_FILE — a exclusão de mapeamento/fences consumiu o documento inteiro"
+
+fdd7_violacoes="$(printf '%s\n' "$fdd7_varridas" \
+  | "$GREP" -iE "($FDD7_SCHEMA).{0,40}($FDD7_TERMOS)|($FDD7_TERMOS).{0,40}($FDD7_SCHEMA)" || true)"
+fdd7_n="$(printf '%s' "$fdd7_violacoes" | "$GREP" -c . || true)"
+
+if [ "$fdd7_n" -eq 0 ]; then
+  echo "FDD-7 OK — $fdd7_n_varridas linhas varridas fora de '### Mapeamento payload ↔ schema' e de fences, $fdd7_n linha(s) nomeando os cinco termos como coluna do schema"
+  pass=$((pass + 1))
+else
+  echo "FDD-7 FALHA — $fdd7_n linha(s) afirmando que a coluna do schema se chama por um dos cinco termos snake_case (exigido: 0) em $FDD_FILE:"
+  printf '%s\n' "$fdd7_violacoes" | sed 's/^/  /'
 fi
 
 echo
