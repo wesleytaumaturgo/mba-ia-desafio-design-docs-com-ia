@@ -86,6 +86,14 @@ de repassar a responsabilidade ao cliente.
 - A duplicidade escala com a política de retentativa: até 5 entregas do mesmo
   evento (ADR-003), e o timeout de 10 segundos (`[09:42] Diego`) é o gatilho mais
   provável para gerar cópia de um evento que já foi processado.
+- **A estabilidade do `event_id` vira restrição de implementação do replay.** Só
+  há dedup se o identificador for do *evento*, não da linha que o transporta:
+  como o replay da DLQ (ADR-003) cria uma linha nova de outbox, essa linha tem de
+  **copiar** o `event_id` do evento original em vez de gerar um novo. Se gerar um
+  novo, o cliente que deduplica corretamente processa o replay como evento
+  inédito e DEC-10 deixa de valer justamente no caminho em que mais importa. A
+  consequência está registrada no FDD, §DLQ e replay e §Mapeamento payload ↔
+  schema.
 - O replay manual da DLQ (ADR-003) é uma sexta chance de duplicata, disparada por
   operador — e reentrega fora da ordem original, somando-se ao limite de ordering
   já registrado em DEC-04 (ADR-002).

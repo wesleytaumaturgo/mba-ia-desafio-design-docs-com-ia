@@ -22,7 +22,7 @@ histórico (linha 159) são incondicionais, mas a mexida em estoque é condicion
 transição específica: `shouldDebitStock` só é verdadeiro em `PENDING → PAID` e
 `shouldReplenishStock` só em `→ CANCELLED` vindo de `PAID` ou `PROCESSING`
 (`src/modules/orders/order.status.ts`:29 e :33, chamados em
-`src/modules/orders/order.service.ts`:151 e :154). Em 5 das 8 transições
+`src/modules/orders/order.service.ts`:151 e :154). Em 4 das 7 transições
 possíveis nenhum produto é tocado. Isso importa aqui porque define o que está
 realmente garantido pela transação em toda transição — e é `order` +
 `order_status_history`, não estoque.
@@ -130,7 +130,7 @@ quais endpoints querem aquele status.
   cobertura da feature nasce com um buraco declarado — nenhum evento é emitido
   quando a order entra em `PENDING`. A reunião não decidiu nada sobre isso porque
   `PENDING` e `CANCELLED` não foram citados por ninguém (DIV-12), embora existam
-  no enum (`prisma/schema.prisma`:16–23) e participem de 4 das 8 transições.
+  no enum (`prisma/schema.prisma`:16–23) e participem de 4 das 7 transições.
 - A transação de `changeStatus` ganha mais uma escrita. Ela já era o ponto
   pesado do fluxo — foi esse o argumento que matou o disparo síncrono
   (`[09:04] Bruno`, REC-01) — e agora segura o lock da order também durante o

@@ -18,8 +18,9 @@ transação que já altera o status, é gravado numa tabela outbox no MySQL que 
 projeto já usa e é entregue por um worker em processo separado, que consome a
 outbox por polling e assina cada envio. Falha de entrega entra numa política de
 retry finita; esgotadas as tentativas, o evento vai para uma dead-letter queue
-com replay administrativo. O público é o cliente B2B integrador, que hoje só
-descobre mudança de status consultando a API repetidamente.
+com replay administrativo. O público é o cliente B2B integrador — que hoje,
+ressalve-se, não descobre mudança de status de forma nenhuma: a consulta
+repetida que a reunião pressupôs não está aberta a ele (DIV-08, abaixo).
 
 Em uma frase: **outbox transacional no banco que já temos, consumida por um
 worker separado que entrega assinado, com retry finito e DLQ.**
@@ -40,14 +41,11 @@ viável sem infraestrutura nova.
 A premissa declarada do problema é que os clientes hoje resolvem isso por
 consulta repetida à API de pedidos — `[09:00] Marcos`: "Hoje eles ficam batendo
 no GET /orders de tempos em tempos". **Ressalva registrada (DIV-08):** o disco
-não sustenta a premissa na forma dita. A rota existe, mas todo o roteador de
-pedidos está atrás do middleware de autenticação, que só aceita o token de
-usuário interno da plataforma — não há hoje credencial que um cliente externo
-possa usar para chamá-la. Consta também que não existe usuário que represente o
-cliente no modelo de dados (DIV-07). O problema real, portanto, é mais forte do
-que o narrado: hoje não há caminho de auto-atendimento nenhum, e a reunião
-projetou o consumo por polling a partir de uma capacidade que o código não
-oferece. Isso não invalida a demanda; muda o baseline com que ela é comparada.
+não sustenta essa premissa — nenhum cliente externo tem credencial para chamar
+a rota, e o modelo de dados não tem identidade de cliente (DIV-07); a
+consequência de produto está no PRD e a de autorização, em
+[ADR-008](adrs/ADR-008-modelo-de-autorizacao-do-modulo.md). Isso não invalida a
+demanda; muda o baseline com que ela é comparada.
 
 ## Proposta técnica
 
@@ -69,9 +67,8 @@ Cada decisão estruturante em uma frase, com o ADR que a detalha:
 - O evento é persistido como linha de uma tabela outbox no MySQL já existente, em
   vez de trafegar por infraestrutura de mensageria nova —
   [ADR-001](adrs/ADR-001-outbox-no-mysql.md).
-- Essa gravação acontece **dentro** da transação que muda o status, em
-  `src/modules/orders/order.service.ts`, por uma função que recebe o handle
-  transacional em vez de um repositório injetado —
+- Essa gravação acontece **dentro** da transação que muda o status, de modo que
+  o rollback do status implique o rollback do evento —
   [ADR-007](adrs/ADR-007-insercao-na-outbox-dentro-da-transacao.md).
 - O consumo é feito por um worker em processo separado da API, com entry-point
   própria em `src/worker.ts` (novo) e cliente de banco próprio, lendo a outbox
@@ -171,6 +168,7 @@ cliente.
 | RFC-QA-02 | Nome do arquivo que abriga a lógica de processamento do worker | Dois nomes foram oferecidos e o fechamento foi um aceno genérico, sem eleger um | `[09:28] Bruno` | Baixo tecnicamente, alto em confusão: o nome errado mistura processo e lógica. **O FDD adota um nome provisoriamente** (D-05) e a escolha continua aberta aqui |
 | RFC-QA-03 | Se haverá limitação de taxa de envio por cliente | A reunião tirou do escopo e, no mesmo movimento, pediu que ficasse registrado como ponto em aberto | `[09:39] Diego` | Um cliente com pico de mudanças de status pode ser inundado; sem decisão, o comportamento sob rajada é acidental, não projetado |
 | RFC-QA-04 | Garantia de ordenação quando houver mais de um worker | A perda da garantia foi reconhecida e a solução empurrada para o futuro, sem escolher entre particionamento e lock | `[09:12] Diego` | A limitação precisa estar documentada no contrato desde já; se não estiver, escalar workers vira quebra silenciosa de expectativa do cliente |
+| RFC-QA-05 | Qual é a política de retentativa, já que a ata tem três leituras incompatíveis | `[09:17] Larissa` fecha "5 tentativas"; `[09:17] Diego` enumera cinco intervalos (1m/5m/30m/2h/12h) e soma "quase 15 horas" — 5 chamadas têm 4 intervalos, e as três não fecham | `[09:17] Larissa` · `[09:17] Diego` | **O pacote adota 5 chamadas e 4 intervalos (1m/5m/30m/2h), última tentativa em 2h36min.** A leitura precisa de ratificação: ela reduz a cobertura de ~15h para 2h36min e deixa só 36 min de margem sobre a indisponibilidade de 2h de `[09:16] Diego` |
 
 `RFC-QA-01` e `RFC-QA-02` são as duas que o FDD resolve para poder escrever o
 contrato. Em ambos os casos a escolha do FDD é **provisória** e não fecha esta
@@ -181,8 +179,8 @@ seção: se a revisão preferir a outra forma, o FDD muda e o RFC não.
 O que muda no sistema existente é pontual e crítico: a transação de mudança de
 status ganha mais uma escrita. Esse é o ponto de acoplamento e também o principal
 risco — um defeito ali não degrada webhooks, derruba mudança de status de pedido.
-A mitigação é a decisão de ADR-007, que mantém o acoplamento numa função que
-recebe o handle transacional, sem inverter dependências do serviço de pedidos.
+A mitigação é a decisão de ADR-007, que isola a gravação numa função dedicada
+sem inverter dependências do serviço de pedidos.
 
 O segundo risco é de premissa, não de código. A reunião trabalhou sobre um
 retrato do repositório que o disco só confirma em parte: a rota de consulta que
@@ -198,12 +196,10 @@ reunião (DIV-12). O pacote de eventos, portanto, precisa dizer explicitamente
 quais transições emitem evento — o padrão silencioso seria emitir menos do que o
 cliente espera.
 
-Os pontos restantes não são defeito, são fronteira. O vocabulário de campo que a
-reunião falou é o do **contrato público**, que fica em snake_case por decisão; o
-schema interno é camelCase (DIV-01, DIV-02, DIV-03). Nada a conciliar: o FDD
-declara o mapeamento campo a campo, e nenhum documento afirma nome de coluna. Já
-o padrão de identificador do projeto não é universal (DIV-10) — vale para quase
-todos os modelos, não para todos, e é o FDD que registra a exceção.
+Os pontos restantes não são defeito, são fronteira: divergências de vocabulário
+e de convenção entre o que a reunião falou e o que o schema usa (DIV-01, DIV-02,
+DIV-03, DIV-10). Nenhuma pede decisão de arquitetura, e todas são resolvidas
+campo a campo no FDD.
 
 A equipe assume: que o volume cabe em um worker único; que polling num banco
 relacional atende a régua de dez segundos; e que o cliente implementa

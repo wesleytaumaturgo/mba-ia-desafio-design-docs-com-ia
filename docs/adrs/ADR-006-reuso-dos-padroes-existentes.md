@@ -154,6 +154,25 @@ literalmente o formato de `INSUFFICIENT_STOCK` e `INVALID_STATUS_TRANSITION`.
   `INVALID_STATUS_TRANSITION` (`src/shared/errors/http-errors.ts`:59 e :49)
   continuam como estão. O projeto passa a ter duas regras, e a diferença entre
   elas é a data em que o código foi escrito.
+- **DEC-13 não é alcançável só por herança: ele exige alterar classes base
+  existentes, e isso colide com a restrição de não alterar o código nesta
+  entrega.** O reuso decidido em `[09:30] Larissa` pressupõe que estender a
+  classe de status já dá o código certo. Isso vale para `BadRequestError`
+  (`src/shared/errors/http-errors.ts`:3–7), `ConflictError` (:33–37) e
+  `UnprocessableEntityError` (:39–43), que recebem o código por parâmetro — e é
+  por isso que `InsufficientStockError` (:55–63) funciona como precedente. Não
+  vale para `ValidationError` (:9–13), `ForbiddenError` (:21–25) e
+  `NotFoundError` (:27–31), que fixam `'VALIDATION_ERROR'`, `'FORBIDDEN'` e
+  `'NOT_FOUND'` dentro do próprio `super(...)`, sem parâmetro; e `AppError`
+  declara `errorCode` como `readonly` (`src/shared/errors/app-error.ts`:5), o
+  que fecha a saída de sobrescrever após a construção. Some-se
+  `src/middlewares/validate.middleware.ts`:25–32, que converte **todo**
+  `ZodError` em `ValidationError` de código fixo — o caminho por onde passa a
+  validação de url do endpoint. Consequência: cinco dos treze códigos da matriz
+  do FDD (as linhas marcadas † em §Matriz de erros) só emitem `WEBHOOK_` depois
+  de um delta nas três classes base. Esta entrega **não** faz esse delta — ela o
+  declara, aqui e na §Integração do FDD, como trabalho pendente e visível, em vez
+  de deixá-lo implícito numa afirmação de reuso que o disco não sustenta.
 - O `requestId` que correlaciona log e resposta é gerado no middleware HTTP
   (`src/middlewares/request-logger.middleware.ts`:6–8); o worker roda fora desse
   caminho, então a correlação entre o request que criou o evento e a entrega que

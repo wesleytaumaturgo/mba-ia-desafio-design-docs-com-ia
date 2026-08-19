@@ -14,15 +14,13 @@ fazem hoje para saber que um pedido mudou de status é polling na API:
 A régua de "tempo real" que eles usam foi dita em voz alta: `[09:02] Marcos` —
 "qualquer coisa abaixo de 10 segundos".
 
-O disco qualifica essa premissa em um ponto que o desenho precisa absorver
-(DIV-08, gravidade Alta): a rota existe (`src/modules/orders/order.routes.ts`:16),
-mas todo o router de orders é precedido por `router.use(authenticate)`
-(`src/modules/orders/order.routes.ts`:14), e `authenticate` só aceita o JWT de
-usuário interno (`src/middlewares/auth.middleware.ts`:41–42). Um cliente externo
-não tem credencial para chamar `GET /orders` hoje — o polling descrito na
-reunião passa por um usuário interno, não pelo cliente final. Isso não muda a
-decisão desta ADR; muda quem é o consumidor real do que for entregue, e por isso
-está registrado aqui (ver ADR-008 para o modelo de autorização).
+O disco qualifica essa premissa (DIV-08, gravidade Alta): um cliente externo não
+tem credencial para chamar `GET /orders` hoje, então o polling descrito na
+reunião passa por um usuário interno, não pelo cliente final. Isso **não muda a
+decisão desta ADR** — muda quem é o consumidor real do que for entregue, o que é
+consequência do modelo de autorização e está desenvolvido, com as evidências de
+código, em
+[ADR-008](ADR-008-modelo-de-autorizacao-do-modulo.md).
 
 A primeira ideia foi disparar o webhook dentro do próprio service de orders, de
 forma síncrona — `[09:03] Larissa` levantou o desenho e `[09:04] Bruno` mostrou o
@@ -85,7 +83,9 @@ quando uma linha entrasse.
   banco a gente até tem, mas ela não notifica processo externo". Não há trigger
   nenhuma no repositório: `grep -rniE 'trigger' src/ prisma/ tests/ package.json`
   retorna vazio, e `prisma/migrations/20260519182739_init/migration.sql` tem
-  apenas `CREATE TABLE`, `CREATE INDEX` e `ADD FOREIGN KEY` em 125 linhas
+  apenas 7 `CREATE TABLE` — com os índices declarados como cláusulas `INDEX`
+  dentro deles, não como statement `CREATE INDEX`, que não ocorre nenhuma vez —
+  e 6 `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY`, em 125 linhas
   (GAN-11, veredito `[ausente no código]`). O descarte continua válido pela razão
   dita; o que não é fato é o "a gente até tem".
 

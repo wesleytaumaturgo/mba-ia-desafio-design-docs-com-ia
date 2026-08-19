@@ -27,9 +27,13 @@ convenções do restante do schema.
 
 ## Decisão
 
-Uma entrega que falha é retentada até 5 vezes, com backoff exponencial na progressão 1m/5m/30m/2h/12h; esgotadas as tentativas, o evento sai da outbox e vai
-para uma DLQ em tabela própria, `webhook_dead_letter`, que guarda o payload, o
-motivo da falha e o timestamp. A saída da DLQ é o replay manual por endpoint
+Uma entrega falha é submetida a **5 tentativas, com backoff exponencial na
+progressão 1m/5m/30m/2h** — 5 chamadas, 4 intervalos, última tentativa 2h36min
+após a primeira falha. O número de tentativas é o que `[09:17] Larissa` fecha
+("Decidido: 5 tentativas"); a progressão de 4 degraus é a leitura que essa
+decisão impõe (ver §Consequências/Negativas e RFC-QA-05). Esgotadas as
+tentativas, o evento é registrado numa DLQ em tabela própria,
+`webhook_dead_letter`, que guarda o payload, o motivo da falha e o timestamp. A saída da DLQ é o replay manual por endpoint
 administrativo, que recoloca o evento na outbox como pendente — capacidade pedida
 em `[09:18] Diego`: "Manual via endpoint admin. Tipo um POST
 /admin/webhooks/dead-letter/:id/replay. Recoloca na outbox como pendente."
@@ -81,11 +85,12 @@ Manter tudo numa tabela só, distinguindo o evento morto por estado.
 
 ### Positivas
 
-- A janela de ~15 horas cobre com margem a indisponibilidade real que motivou a
-  discussão — duas horas de manutenção planejada (`[09:16] Diego`).
+- A janela de 2h36min cobre a indisponibilidade real que motivou a discussão —
+  duas horas de manutenção planejada (`[09:16] Diego`) — com 36 minutos de
+  margem.
 - A outbox principal continua sendo lida só por quem tem chance de entrega: o
-  evento morto sai da tabela quente, o que preserva o "lê só os pendentes em
-  batch pequeno" do worker (`[09:08] Diego`).
+  evento morto passa a `FAILED` e sai do conjunto elegível, o que preserva o "lê
+  só os pendentes em batch pequeno" do worker (`[09:08] Diego`).
 - A DLQ carrega payload, motivo e timestamp — material suficiente para diagnóstico
   sem consultar log, e é a origem do replay pedido em `[09:18] Diego`.
 - As duas tabelas seguem o precedente de schema já existente
@@ -94,10 +99,29 @@ Manter tudo numa tabela só, distinguindo o evento morto por estado.
 
 ### Negativas
 
-- Um evento só é declarado morto quase 15 horas depois da primeira falha
-  (`[09:17] Diego`). Até lá ele ocupa linha na outbox, é relido pelo worker a
-  cada ciclo elegível e consome uma chamada HTTP por tentativa — a cobertura
-  longa é paga em retenção e trabalho repetido contra um endpoint que já falhou.
+- **A ata é ambígua e a política adotada é uma leitura, não um registro.** Três
+  falas da mesma janela não fecham entre si: `[09:17] Larissa` decide "5
+  tentativas"; `[09:17] Diego` enumera cinco intervalos ("1 minuto, 5 minutos,
+  30 minutos, 2 horas, 12 horas"); e o mesmo `[09:17] Diego` conclui "Total de
+  quase 15 horas entre primeira falha e última tentativa". Cinco chamadas têm
+  quatro intervalos, não cinco — as três afirmações não podem ser todas
+  verdadeiras. Este ADR adota a fala que **fecha** a decisão (5 tentativas) e
+  trata a enumeração e a soma de Diego como observação. Consequência concreta:
+  a janela cai de ~15h para **2h36min**, que cobre a indisponibilidade de 2h de
+  `[09:16] Diego` com **~36 minutos de margem** — apertado, e bem abaixo da
+  janela de "12 ou 24 horas" que `[09:15] Diego` dizia estar mirando. A leitura
+  precisa de ratificação: RFC-QA-05.
+- Um evento é declarado morto 2h36min depois da primeira falha. Até lá ele ocupa
+  linha na outbox, é relido pelo worker a cada ciclo elegível e consome uma
+  chamada HTTP por tentativa — a cobertura é paga em retenção e trabalho
+  repetido contra um endpoint que já falhou.
+- **A linha de origem é retida, e isso é decisão do desenho, não da ata.** A
+  reunião decidiu a tabela separada (DEC-06, `[09:18] Bruno`) e não disse o que
+  fazer com a linha da outbox que originou o item morto. O pacote adota a
+  retenção: a linha permanece em `webhook_outbox` marcada `FAILED`, e não é
+  apagada. A razão é que o replay e o diagnóstico dependem desse histórico — o
+  replay cria linha nova a partir do snapshot e precisa da linha antiga como
+  registro da falha. O custo é retenção permanente sem política de expurgo.
 - Duas tabelas para operar em vez de uma, e nenhuma delas com rotina de limpeza:
   o arquivamento de linhas entregues ficou fora do escopo desta feature
   (`[09:08] Diego`, REC-11), e a DLQ não tem política de expurgo decidida.

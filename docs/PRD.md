@@ -24,7 +24,7 @@ formal de três clientes B2B nomeados — Atlas Comercial, MaxDistribuição e N
 Cargo (RNF-25, `[09:00] Marcos`) — e carrega peso comercial explícito: "se a
 gente não entregar isso até fim do trimestre, eles podem migrar pro nosso
 concorrente" (RNF-24, `[09:00] Marcos`). O prazo combinado com a área comercial
-é o fim de novembro (RNF-23, `[09:45] Marcos`).
+é o fim de novembro (PRD-RNF-21, `[09:45] Marcos`).
 
 Hoje esses clientes só descobrem que um pedido mudou de status voltando a
 perguntar — a premissa declarada na reunião é que eles "ficam batendo no GET
@@ -73,10 +73,8 @@ administrativo de um evento que esgotou as tentativas de entrega.
 | Objetivo | Métrica | Meta | Origem |
 |---|---|---|---|
 | Eliminar a necessidade de o cliente consultar a API repetidamente para saber de mudanças de status | Tempo entre a transição de status e a primeira tentativa de entrega | abaixo de 10 segundos | RNF-01, `[09:02] Marcos` |
-| Garantir previsibilidade de latência mesmo no cenário mais lento do pipeline | Latência de entrega no pior caso | até 2 segundos | RNF-03, `[09:10] Larissa` |
-| Cumprir o compromisso comercial assumido com os três clientes que pediram a feature | Data de disponibilidade em produção | até o fim de novembro | RNF-23, `[09:45] Marcos` |
+| Cumprir o compromisso comercial assumido com os três clientes que pediram a feature | Data de disponibilidade em produção | até o fim de novembro | PRD-RNF-21, `[09:45] Marcos` |
 | Não sacrificar segurança pela pressão de prazo | Janela reservada para revisão de segurança antes do deploy | pelo menos 2 dias úteis | RNF-27, `[09:46] Sofia` |
-| Suportar o pico de mudanças de status de um único cliente sem perda de evento | Cenário de carga tolerado sem descarte | 50 pedidos mudando de status em 1 minuto | RNF-21, `[09:38] Diego` |
 
 ## Escopo
 
@@ -144,12 +142,12 @@ Adiados para fase futura:
 |---|---|---|---|
 | PRD-RNF-01 | Evento chega ao cliente em menos de 10 segundos, na definição de "tempo real" dada pelos próprios clientes | performance | RNF-01, `[09:02] Marcos` |
 | PRD-RNF-02 | O intervalo entre leituras de eventos pendentes é de 2 segundos | performance | RNF-02, `[09:09] Diego` |
-| PRD-RNF-03 | A latência de entrega aceita, no pior caso, é de 2 segundos | performance | RNF-03, `[09:10] Larissa` |
+| PRD-RNF-03 | A latência mínima imposta pelo intervalo de polling é de 2 segundos — é o piso do mecanismo, não um teto de entrega | performance | RNF-03, `[09:10] Larissa` |
 | PRD-RNF-04 | A fila de eventos pendentes é indexada por status e por data de criação, para leitura eficiente | performance | RNF-04, `[09:08] Diego` |
 | PRD-RNF-05 | A leitura de eventos pendentes processa apenas os ainda não entregues, em lotes pequenos | performance | RNF-05, `[09:08] Diego` |
 | PRD-RNF-06 | Uma entrega é retentada até 5 vezes antes de ser movida para a fila de eventos mortos | operação | RNF-07, `[09:17] Larissa` |
-| PRD-RNF-07 | A progressão entre tentativas de entrega é 1 minuto, 5 minutos, 30 minutos, 2 horas e 12 horas | operação | RNF-08, `[09:17] Diego` |
-| PRD-RNF-08 | O intervalo total entre a primeira falha e a última tentativa de entrega é de aproximadamente 15 horas | operação | RNF-09, `[09:17] Diego` |
+| PRD-RNF-07 | A progressão entre as 5 tentativas de entrega tem 4 intervalos: 1 minuto, 5 minutos, 30 minutos e 2 horas | operação | DEC-05, `[09:17] Larissa` (interpretação — a ata é ambígua, ver RFC-QA-05) |
+| PRD-RNF-08 | O intervalo total entre a primeira falha e a última tentativa de entrega é de 2 horas e 36 minutos | operação | derivado de PRD-RNF-06 e PRD-RNF-07; ver RFC-QA-05 |
 | PRD-RNF-09 | Após rotação de secret, a secret anterior permanece válida em paralelo por 24 horas | segurança | RNF-13, `[09:21] Sofia` |
 | PRD-RNF-10 | A url de um endpoint de webhook precisa usar TLS | segurança | RNF-14, `[09:23] Sofia` |
 | PRD-RNF-11 | Cadastro ou edição com url insegura é recusado com erro de validação | segurança | RNF-15, `[09:23] Sofia` |
@@ -157,10 +155,13 @@ Adiados para fase futura:
 | PRD-RNF-13 | A garantia de entrega é de pelo menos uma vez; o cliente precisa suportar receber o mesmo evento mais de uma vez | compatibilidade | RNF-18, `[09:24] Diego` |
 | PRD-RNF-14 | O histórico de entregas exposto ao cliente cobre os últimos 100 envios de cada endpoint | operação | RNF-19, `[09:34] Marcos` |
 | PRD-RNF-15 | Toda execução do endpoint administrativo de replay registra quem a executou, para fins de auditoria | segurança | RNF-20, `[09:36] Sofia` |
-| PRD-RNF-16 | O sistema suporta, sem perda de evento, um cliente com até 50 pedidos mudando de status em um minuto | performance | RNF-21, `[09:38] Diego` |
+| PRD-RNF-16 | Cenário de carga **citado**, não dimensionado nem contratado: um cliente com 50 pedidos mudando de status em um minuto. A fala é a pergunta retórica que abriu um assunto tirado de escopo em seguida (ver RFC-QA-03); nenhuma capacidade foi medida ou prometida | performance | RNF-21, `[09:38] Diego` |
 | PRD-RNF-17 | Uma tentativa de entrega que não recebe resposta em 10 segundos é tratada como falha | performance | RNF-22, `[09:42] Diego` |
 | PRD-RNF-18 | O esforço estimado de entrega é de três sprints, já incluindo a revisão de segurança | operação | RNF-26, `[09:47] Larissa` |
 | PRD-RNF-19 | Pelo menos dois dias úteis do cronograma são reservados para revisão de segurança antes do deploy | segurança | RNF-27, `[09:46] Sofia` |
+| PRD-RNF-20 | A secret de assinatura e o header que a transporta entram na lista de campos redigidos em log | segurança | `src/shared/logger/index.ts:4` — a lista atual não cobre esses valores; sem origem na reunião |
+| PRD-RNF-21 | A data combinada de disponibilidade em produção é o fim de novembro | prazo | RNF-23, `[09:45] Marcos` |
+| PRD-RNF-22 | A secret nunca é devolvida em texto claro fora da criação e da rotação | segurança | **sem origem na reunião** — a fala cobre a devolução na criação, não a proibição nas demais consultas; ver tracker, §Itens sem origem identificável |
 
 ## Decisões e trade-offs principais
 
@@ -194,14 +195,16 @@ nova — essa é, aliás, uma das decisões estruturantes do desenho (ADR-001).
 | O processo de entrega opera com uma única instância, sem garantia de ordenação global entre pedidos diferentes | Alta | Médio — cliente pode ver eventos de pedidos distintos fora de ordem se o sistema escalar sem planejamento | Limitação documentada como parte do contrato; escalar para mais de uma instância é decisão explicitamente adiada, não silenciosa |
 | A cobertura de eventos nasce com uma lacuna: nem toda transição de status do pedido passa pelo mesmo caminho de código que dispara o evento | Alta | Médio — cliente pode não ser notificado de uma transição específica | Lacuna registrada nos documentos técnicos; decisão sobre cobrir esse caminho fica pendente antes da implementação, não assumida por omissão |
 | O cadastro e a edição de configuração de webhook ficam abertos a qualquer usuário autenticado da plataforma, sem controle por dono, nesta primeira fase | Média | Médio — um operador poderia alterar a configuração de um cliente que não é o seu | Endurecimento do controle de acesso já está registrado como item adiado, com decisão explícita de revisitar; não é lacuna não vista |
-| A secret de assinatura do webhook pode vazar em log, porque a lista de campos redigidos hoje não cobre esse valor | Média | Alto — comprometeria a verificação de origem de todas as entregas de um endpoint | Inclusão da secret e do header de assinatura na lista de redação de log é item de escopo desta feature, com critério de aceite próprio |
+| A secret de assinatura do webhook pode vazar em log, porque a lista de campos redigidos hoje não cobre esse valor | Média | Alto — comprometeria a verificação de origem de todas as entregas de um endpoint | Inclusão da secret e do header de assinatura na lista de redação de log é item de escopo desta feature, rastreada como PRD-RNF-20, com critério de aceite próprio em §Critérios de aceitação |
 
 ## Critérios de aceitação
 
 - Um cliente cadastrado consegue criar, editar, remover e listar seus
   endpoints de webhook.
 - A secret de um endpoint só é exposta em texto claro no momento da criação e
-  no momento de uma rotação — nunca nas demais consultas.
+  no momento de uma rotação — nunca nas demais consultas (PRD-RNF-22).
+- A secret de assinatura e o header que a transporta não aparecem em texto claro
+  em nenhuma linha de log (PRD-RNF-20).
 - Um cliente que assina apenas parte dos status de pedido só recebe eventos
   desses status, não dos demais.
 - Uma mudança de status com pelo menos um endpoint interessado resulta numa

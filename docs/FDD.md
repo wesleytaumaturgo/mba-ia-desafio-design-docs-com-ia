@@ -4,9 +4,10 @@
 
 Este documento é o recorte de implementação do que o RFC propôs em nível de
 arquitetura. Ele existe porque a feature inteira é estrutura nova: a varredura do
-repositório em `.planning/02-codigo.md` §4 procurou `outbox`, `worker`, `webhook`,
-`hmac`, `retry`, `dead-letter`, `event`, `idempot`, `cron` e `trigger` em `src/`,
-`prisma/`, `tests/` e `package.json` e devolveu saída vazia em todos os doze
+repositório em `.planning/02-codigo.md` §4 procurou `outbox`, `fila/broker`,
+`worker`, `scheduler/cron`, `hmac/crypto`, `retry/backoff`, `dead-letter`,
+`webhook`, `event`, `publisher/emissão`, `idempotência` e `trigger de banco` em
+`src/`, `prisma/`, `tests/` e `package.json` e devolveu saída vazia nos doze
 padrões. Não há símbolo, arquivo ou tabela existente que sirva de ponto de partida
 parcial — só padrões a seguir.
 
@@ -42,7 +43,7 @@ em `src/modules/webhooks/webhook.processor.ts` (novo)
   secret única por endpoint cadastrado (DEC-07, DEC-08).
 - Aplicar timeout de 10 segundos por tentativa de entrega e tratar o estouro como
   falha (DEC-23).
-- Retentar entrega falha 5 vezes, com a progressão 1m/5m/30m/2h/12h, e mover o
+- Retentar entrega falha 5 vezes, com a progressão 1m/5m/30m/2h, e mover o
   evento para a dead-letter queue quando as tentativas se esgotarem (DEC-05,
   DEC-06).
 - Recusar payload que ultrapasse 64KB, com erro (RNF-17).
@@ -123,7 +124,7 @@ evento já emitido.
 (DIV-12).** `OrderStatus` tem seis valores — `PENDING`, `PAID`, `PROCESSING`,
 `SHIPPED`, `DELIVERED`, `CANCELLED` (`prisma/schema.prisma`:16–23). A reunião
 nomeou quatro (`PAID`, `PROCESSING`, `SHIPPED`, `DELIVERED`); `PENDING` e
-`CANCELLED` existem, participam de 4 das 8 transições da tabela `transitions`
+`CANCELLED` existem, participam de 4 das 7 transições da tabela `transitions`
 (`src/modules/orders/order.status.ts`:3–10) e carregam o efeito de reposição de
 estoque, e ninguém os citou. A validação do filtro aceita o enum inteiro, via
 `z.nativeEnum(OrderStatus)`, porque restringir a quatro seria inventar uma regra
@@ -170,17 +171,27 @@ contrato porque escalar o worker é questão em aberto (RFC-QA-04).
 ### Retry
 
 Toda falha de entrega — resposta não-2xx, erro de conexão ou estouro do timeout de
-10 segundos — incrementa `attempts` e agenda `nextAttemptAt`. São 5 tentativas, na
-progressão **1 minuto, 5 minutos, 30 minutos, 2 horas, 12 horas** (DEC-05,
-RNF-07, RNF-08). O total entre a primeira falha e a última tentativa é de quase 15
-horas (RNF-09), o que cobre a janela de 12 a 24 horas que a reunião mirou (RNF-10)
-e a indisponibilidade de duas horas em manutenção planejada já observada em cliente
-(RNF-11).
+10 segundos — incrementa `attempts` e agenda `nextAttemptAt`. São **5 chamadas no
+total** e, portanto, **4 intervalos**: **1 minuto, 5 minutos, 30 minutos, 2 horas**
+(DEC-05, `[09:17] Larissa`) — *(interpretação — a ata é ambígua, ver RFC-QA-05)*.
+A última tentativa cai **2h36min** após a primeira falha, o que cobre a
+indisponibilidade de duas horas em manutenção planejada já observada em cliente
+(RNF-11) com 36 minutos de margem.
 
 ```
 tentativa 1 falha → +1m  → tentativa 2 falha → +5m  → tentativa 3 falha
-   → +30m → tentativa 4 falha → +2h → tentativa 5 falha → +12h → DLQ
+   → +30m → tentativa 4 falha → +2h → tentativa 5 falha → DLQ
 ```
+
+| Tentativa | Instante após a primeira falha |
+|---|---|
+| 1 | 0 (a falha que abre a série) |
+| 2 | +1m |
+| 3 | +6m |
+| 4 | +36m |
+| 5 | +2h36m |
+
+Esgotada a 5ª, a linha vai para a DLQ sem espera adicional.
 
 A linha volta a `PENDING` com `nextAttemptAt` no futuro; o `SELECT` do worker
 respeita `nextAttemptAt <= agora`, então o backoff é implementado pela query, não
@@ -208,7 +219,12 @@ webhook_dead_letter ──POST /admin/webhooks/dead-letter/:id/replay (role ADMI
 O replay é manual, por endpoint administrativo, e recoloca o evento na outbox como
 pendente (RF-08). Ele **cria uma linha nova** em `webhook_outbox` a partir do
 snapshot guardado, com `attempts` zerado, em vez de ressuscitar a linha antiga: a
-linha antiga é o registro histórico da falha e não é reescrita. O item da DLQ é
+linha antiga é o registro histórico da falha e não é reescrita. A linha nova
+**preserva o `event_id` do evento original** — ela é outra linha, não outro
+evento. Se recebesse `event_id` novo, o cliente veria o replay como um evento
+inédito e o `X-Event-Id` deixaria de ser a chave estável de deduplicação que
+DEC-10 contratou (ADR-005); é por isso que `event_id` é campo copiado, e não o
+id da linha (ver §Mapeamento payload ↔ schema). O item da DLQ é
 marcado como já reprocessado, e uma segunda tentativa de replay sobre o mesmo item
 é recusada.
 
@@ -407,7 +423,11 @@ Response:
 **Status:** 200 — secret rotacionada.
 **Status:** 404 — `WEBHOOK_NOT_FOUND`, id inexistente.
 **Status:** 409 — `WEBHOOK_ROTATION_IN_GRACE_PERIOD`, rotação anterior ainda dentro
-das 24 horas.
+das 24 horas. **(decisão de desenho deste FDD, sem origem na reunião:**
+`[09:21] Sofia` institui o grace period e não recusa uma segunda rotação dentro
+dele; bloquear a re-rotação impede revogar uma secret comprometida por 24 horas,
+o oposto do que a fala pretendia proteger — a regra precisa de dono ou de
+remoção.**)**
 
 ### GET /webhooks/:id/deliveries
 
@@ -532,7 +552,7 @@ contradição a conciliar (DIV-01, DIV-02, DIV-03).
 | `total_cents` | `Order.totalCents` | `prisma/schema.prisma`:81 |
 | `from_status` | `OrderStatusHistory.fromStatus` | `prisma/schema.prisma`:119 |
 | `to_status` | `OrderStatusHistory.toStatus` | `prisma/schema.prisma`:120 |
-| `event_id` | `WebhookOutbox.id` — gerado na inserção, UUID (DEC-26) | `prisma/schema.prisma` (novo model) |
+| `event_id` | **O id do evento, não necessariamente o id da linha.** Na primeira inserção ele é gerado junto com a linha e coincide com `WebhookOutbox.id` (UUID, DEC-26); numa linha criada por replay ele é **copiado do evento original**, e por isso as duas linhas carregam o mesmo `event_id` | `prisma/schema.prisma` (novo model) |
 | `event_type` | constante `order.status_changed`, sem origem no schema | — |
 | `timestamp` | `WebhookOutbox.createdAt` | `prisma/schema.prisma` (novo model) |
 
@@ -549,21 +569,35 @@ nunca `AppError` direto — seguindo o precedente de `InsufficientStockError`
 `src/shared/errors/index.ts`. É isso que garante o mapeamento automático para o
 status HTTP no primeiro ramo de `src/middlewares/error.middleware.ts`:15.
 
+**Estender a classe de status não basta para todas elas.** Só três classes base
+aceitam um código próprio como parâmetro de construtor: `BadRequestError`
+(`src/shared/errors/http-errors.ts`:3–7), `ConflictError` (:33–37) e
+`UnprocessableEntityError` (:39–43) — é por isso que
+`InvalidStatusTransitionError` (:45–53) e `InsufficientStockError` (:55–63)
+funcionam como precedente. As outras fixam o próprio código no `super(...)` e não
+expõem parâmetro: `ValidationError` (:9–13), `ForbiddenError` (:21–25) e
+`NotFoundError` (:27–31). E `AppError` declara o campo como `readonly`
+(`src/shared/errors/app-error.ts`:5), então também não dá para sobrescrevê-lo
+depois de construído. As linhas marcadas com **†** dependem dessas três classes e
+**não emitem o código `WEBHOOK_` desejado sem alteração das classes base
+existentes** — trabalho fora do escopo desta entrega, declarado em ADR-006
+§Consequências/Negativas e detalhado na §Integração.
+
 | ID | Código | HTTP | Classe base | Quando ocorre | Ação do cliente |
 |---|---|---|---|---|---|
-| FDD-ERR-01 | WEBHOOK_URL_NOT_HTTPS | 400 | `ValidationError` | url informada não usa TLS (RNF-14, RNF-15) | corrigir a url para https e repetir |
+| FDD-ERR-01 | WEBHOOK_URL_NOT_HTTPS | 400 | `ValidationError` † | url informada não usa TLS (RNF-14, RNF-15) | corrigir a url para https e repetir |
 | FDD-ERR-02 | WEBHOOK_INVALID_STATUS_FILTER | 422 | `UnprocessableEntityError` | lista de status assinados traz valor fora de `OrderStatus` | usar somente valores do enum publicado |
-| FDD-ERR-03 | WEBHOOK_DUPLICATE_URL | 409 | `ConflictError` | url já cadastrada e ativa para o mesmo cliente | editar o endpoint existente em vez de criar outro |
-| FDD-ERR-04 | WEBHOOK_NOT_FOUND | 404 | `NotFoundError` | id de endpoint inexistente ou de outro cliente | conferir o id devolvido na criação |
-| FDD-ERR-05 | WEBHOOK_CUSTOMER_NOT_FOUND | 404 | `NotFoundError` | `customerId` do path não existe | conferir o identificador do cliente |
-| FDD-ERR-06 | WEBHOOK_ROTATION_IN_GRACE_PERIOD | 409 | `ConflictError` | nova rotação pedida com a janela de 24 horas ainda aberta | aguardar o fim da janela antes de rotacionar de novo |
-| FDD-ERR-07 | WEBHOOK_REPLAY_FORBIDDEN | 403 | `ForbiddenError` | replay pedido por usuário autenticado sem role `ADMIN` (DEC-19) | pedir a operação a quem tem o papel |
-| FDD-ERR-08 | WEBHOOK_DEAD_LETTER_NOT_FOUND | 404 | `NotFoundError` | id de item da dead-letter queue inexistente | conferir o id na consulta da fila |
-| FDD-ERR-09 | WEBHOOK_DEAD_LETTER_ALREADY_REPLAYED | 409 | `ConflictError` | item já reprocessado por um replay anterior | consultar a outbox pelo evento reenviado |
+| FDD-ERR-03 | WEBHOOK_DUPLICATE_URL | 409 | `ConflictError` | url já cadastrada e ativa para o mesmo cliente **(decisão de desenho deste FDD, sem origem na reunião)** | editar o endpoint existente em vez de criar outro |
+| FDD-ERR-04 | WEBHOOK_NOT_FOUND | 404 | `NotFoundError` † | id de endpoint inexistente ou de outro cliente | conferir o id devolvido na criação |
+| FDD-ERR-05 | WEBHOOK_CUSTOMER_NOT_FOUND | 404 | `NotFoundError` † | `customerId` do path não existe | conferir o identificador do cliente |
+| FDD-ERR-06 | WEBHOOK_ROTATION_IN_GRACE_PERIOD | 409 | `ConflictError` | nova rotação pedida com a janela de 24 horas ainda aberta **(decisão de desenho deste FDD, sem origem na reunião)** | aguardar o fim da janela antes de rotacionar de novo |
+| FDD-ERR-07 | WEBHOOK_REPLAY_FORBIDDEN | 403 | `ForbiddenError` † | replay pedido por usuário autenticado sem role `ADMIN` (DEC-19) | pedir a operação a quem tem o papel |
+| FDD-ERR-08 | WEBHOOK_DEAD_LETTER_NOT_FOUND | 404 | `NotFoundError` † | id de item da dead-letter queue inexistente | conferir o id na origem em que ele foi obtido — **nenhum dos sete contratos desta entrega expõe listagem da dead-letter queue**, e essa lacuna não foi decidida na reunião |
+| FDD-ERR-09 | WEBHOOK_DEAD_LETTER_ALREADY_REPLAYED | 409 | `ConflictError` | item já reprocessado por um replay anterior **(decisão de desenho deste FDD, sem origem na reunião)** | consultar a outbox pelo evento reenviado |
 | FDD-ERR-10 | WEBHOOK_PAYLOAD_TOO_LARGE | 422 | `UnprocessableEntityError` | corpo renderizado passa de 64KB (RNF-17) | nenhuma; é falha terminal, o evento vai para a fila de morte |
 | FDD-ERR-11 | WEBHOOK_DELIVERY_TIMEOUT | 422 | `UnprocessableEntityError` | endpoint do cliente não respondeu em 10 segundos (DEC-23) | nenhuma na hora; o envio é retentado |
-| FDD-ERR-12 | WEBHOOK_DELIVERY_FAILED | 422 | `UnprocessableEntityError` | endpoint respondeu fora da faixa 2xx | nenhuma na hora; o envio é retentado |
-| FDD-ERR-13 | WEBHOOK_SIGNATURE_UNAVAILABLE | 422 | `UnprocessableEntityError` | endpoint sem secret utilizável no momento do envio | rotacionar a secret pelo endpoint de rotação |
+| FDD-ERR-12 | WEBHOOK_DELIVERY_FAILED | 422 | `UnprocessableEntityError` | endpoint respondeu fora da faixa 2xx **(decisão de desenho deste FDD, sem origem na reunião)** | nenhuma na hora; o envio é retentado |
+| FDD-ERR-13 | WEBHOOK_SIGNATURE_UNAVAILABLE | 422 | `UnprocessableEntityError` | endpoint sem secret utilizável no momento do envio **(decisão de desenho deste FDD, sem origem na reunião)** | rotacionar a secret pelo endpoint de rotação |
 
 As quatro últimas linhas nascem no worker, fora de um ciclo request/response: o
 `statusCode` que a classe carrega não trafega para cliente nenhum, mas existe
@@ -576,13 +610,13 @@ porque a classe estende a hierarquia do projeto e o código é o que fica gravad
 | Mecanismo | Valor | Origem |
 |---|---|---|
 | Timeout do HTTP call do worker | 10 segundos | DEC-23, RNF-22 |
-| Tentativas antes da fila de morte | 5 | DEC-05, RNF-07 |
-| Progressão do backoff | 1m · 5m · 30m · 2h · 12h | DEC-05, RNF-08 |
-| Janela total coberta | quase 15 horas | RNF-09 |
+| Tentativas antes da fila de morte | 5 chamadas | DEC-05, `[09:17] Larissa` |
+| Progressão do backoff | 1m · 5m · 30m · 2h (4 intervalos) | DEC-05, `[09:17] Larissa` |
+| Janela total coberta | 2h36min | derivada da progressão; ver RFC-QA-05 |
 | Limite de tamanho do corpo | 64KB | RNF-17 |
 | Grace period da secret anterior | 24 horas | DEC-09, RNF-13 |
 | Intervalo de polling | 2 segundos | DEC-02, RNF-02 |
-| Latência aceita no pior caso | 2 segundos | RNF-03 |
+| Latência mínima imposta pelo intervalo de polling | 2 segundos | RNF-03 |
 | Histórico exposto | últimos 100 envios | RF-07, RNF-19 |
 
 **Timeout.** Cliente que não responde em 10 segundos é tratado como falha e o
@@ -670,9 +704,20 @@ o projeto já resolve.
   `requestId` da requisição que originou a mudança de status num campo da linha, e
   o worker o relê e o repete em todo log de entrega. É o único fio que liga o
   `PATCH /orders/:id/status` ao `POST` que chega no cliente.
-- O `X-Event-Id` enviado ao cliente é o mesmo `id` da linha de outbox, o que
+- **Esse fio não existe hoje e depende de delta novo em dois arquivos
+  existentes.** O `requestId` fica em `req.id`, mas
+  `OrderService.changeStatus` recebe apenas `id`, `input` e `userId`
+  (`src/modules/orders/order.service.ts`:126–130) e o controller não o repassa
+  (`src/modules/orders/order.controller.ts`:38–42). Propagá-lo até
+  `publishWebhookEvent` exige acrescentar o argumento em `changeStatus` e passar
+  `req.id` no controller — trabalho declarado, não herdado. Enquanto isso não
+  for feito, a correlação descrita neste item é projeto, não estado atual.
+- O `X-Event-Id` enviado ao cliente é o `event_id` da linha de outbox, o que
   estende a correlação para fora do sistema: o cliente que reclama de um evento
-  cita o identificador que localiza a linha, a entrega e a falha.
+  cita o identificador que localiza a linha, a entrega e a falha. Depois de um
+  replay o mesmo `event_id` localiza **duas** linhas — a que falhou e a que o
+  replay criou —, e é isso que permite ver as duas tentativas como do mesmo
+  evento.
 - Não há tracing distribuído no projeto hoje — nenhuma biblioteca de trace consta
   de `package.json`. O correlacionador aqui é campo em log e em tabela, não span; o
   passo para OpenTelemetry fica registrado como possibilidade, não como escopo.
@@ -743,8 +788,8 @@ precisa considerar isso.
   falha, com `durationMs` registrado.
 - Após 5 falhas, a linha aparece em `webhook_dead_letter` com payload, motivo e
   timestamp, e não é mais lida pelo worker.
-- Os intervalos entre tentativas consecutivas são 1m, 5m, 30m, 2h e 12h, nessa
-  ordem.
+- Os 4 intervalos entre as 5 tentativas consecutivas são 1m, 5m, 30m e 2h, nessa
+  ordem, e a 5ª tentativa ocorre 2h36min após a primeira falha.
 - Corpo renderizado acima de 64KB não é enviado e vai direto para a dead-letter
   queue, com `WEBHOOK_PAYLOAD_TOO_LARGE` como motivo.
 - Toda entrega leva os headers `X-Event-Id`, `X-Signature`, `X-Timestamp`,
@@ -781,7 +826,7 @@ precisa considerar isso.
 
 ## Integração com o sistema existente
 
-Doze caminhos reais são tocados ou explicitamente não tocados. A **localização
+Catorze caminhos reais são tocados ou explicitamente não tocados. A **localização
 exata da inserção dentro da transação** está em
 [ADR-007](adrs/ADR-007-insercao-na-outbox-dentro-da-transacao.md) e não é repetida
 aqui; o que segue é o que o ADR não tem — assinatura da função nova, campos da
@@ -807,6 +852,29 @@ O primeiro parâmetro é o `TxClient` (`src/modules/orders/order.service.ts`:24)
 exatamente como `debitStock` (linha 204) — é o que a torna participante da
 transação. O retorno é a quantidade de linhas de outbox criadas, zero inclusive.
 
+**Dois deltas que a assinatura acima esconde, e que são trabalho em arquivo
+existente, não código novo:**
+
+- **`TxClient` não é público.** Ele é um alias **local**, declarado sem `export`
+  em `src/modules/orders/order.service.ts`:24 (`type TxClient =
+  Prisma.TransactionClient`) e usado só dentro daquele arquivo (linhas 205, 234,
+  245). Um arquivo do módulo de webhooks não consegue importá-lo hoje. Ou o alias
+  passa a ser exportado de `src/modules/orders/order.service.ts` — delta no
+  arquivo existente —, ou a assinatura usa `Prisma.TransactionClient`
+  diretamente, sem alias. A segunda forma não toca arquivo nenhum e é a
+  preferível; a escolha entre as duas fica declarada aqui, não escondida.
+- **O `requestId` não chega ao service.** Ele é gerado pelo middleware de log em
+  `src/middlewares/request-logger.middleware.ts`:5–8 e fica em `req.id`, mas
+  `OrderService.changeStatus` recebe apenas `id`, `input` e `userId`
+  (`src/modules/orders/order.service.ts`:126–130), e o controller não o repassa
+  (`src/modules/orders/order.controller.ts`:38–42, que chama
+  `this.orders.changeStatus(req.params.id!, req.body, req.user.id)`). O campo
+  `requestId?` do input acima é, portanto, **promessa de correlação que hoje não
+  tem por onde ser cumprida**: propagá-lo exige delta novo nos dois arquivos —
+  um quarto argumento em `changeStatus` e a passagem de `req.id` no controller.
+  Enquanto esse delta não existir, o campo chega sempre indefinido e o fio de
+  correlação descrito em §Observabilidade fica cortado.
+
 **Campos da linha de `webhook_outbox`:** `id` (UUID, DEC-26) · `webhookEndpointId`
 (FK) · `orderId` (FK) · `eventType` (`order.status_changed`) · `payload` (snapshot
 renderizado, DEC-27) · `status` (`PENDING` · `PROCESSING` · `DELIVERED` · `FAILED`,
@@ -824,11 +892,13 @@ de um efeito colateral opcional.
 |---|---|
 | `src/modules/orders/order.service.ts` | Ganha uma chamada a `publishWebhookEvent` dentro do callback transacional de `changeStatus` e um import do módulo de webhooks. Construtor (linhas 27–30) intocado: nenhum repository novo é injetado. |
 | `src/modules/orders/order.status.ts` | Ganha o predicado `shouldEmitWebhookEvent(from, to)`, na forma `(from, to) => boolean`, ao lado de `shouldDebitStock` (linha 29). A política de transição segue sendo dado neste arquivo, não `if` no service. |
-| `src/shared/errors/http-errors.ts` | Ganha 13 classes novas, uma por linha de §Matriz de erros, cada uma estendendo a classe de status correspondente — precedente literal `InsufficientStockError` (linha 55), que estende `UnprocessableEntityError` (linha 39). |
+| `src/shared/errors/http-errors.ts` | Ganha 13 classes novas, uma por linha de §Matriz de erros. Oito delas estendem `ConflictError` (linha 33) ou `UnprocessableEntityError` (linha 39), que aceitam código próprio por parâmetro — precedente literal `InsufficientStockError` (linha 55). **As cinco marcadas † na matriz não fecham por herança:** `ValidationError` (linhas 9–13), `ForbiddenError` (21–25) e `NotFoundError` (27–31) fixam `'VALIDATION_ERROR'`, `'FORBIDDEN'` e `'NOT_FOUND'` no próprio `super(...)`, sem parâmetro de código, e `AppError.errorCode` é `readonly` (`src/shared/errors/app-error.ts`:5), o que impede sobrescrever depois. Emitir `WEBHOOK_` nessas cinco exige **alterar as três classes base** (acrescentar parâmetro de código, como `ConflictError` já tem) — mudança em arquivo existente, fora do escopo desta entrega e registrada em ADR-006. |
+| `src/middlewares/validate.middleware.ts` | **Delta não previsto, declarado aqui.** Todo `ZodError` é convertido em `ValidationError('Validation failed', details)` (linhas 25–32), de código fixo. Logo a validação de schema do módulo — incluindo a recusa de url sem TLS, que `[09:23] Sofia` descreve como "só uma validação no schema Zod" — responde com o código genérico, não com `WEBHOOK_URL_NOT_HTTPS`, enquanto este arquivo não for alterado. |
 | `src/shared/errors/index.ts` | Ganha as 13 classes novas na lista de reexport (hoje linhas 3–13). É por este barril que os módulos importam erro; nenhum arquivo de `src/modules/` importa `http-errors` direto. |
 | `src/middlewares/error.middleware.ts` | **Nada muda.** As classes novas estendem `AppError` por herança e caem no primeiro ramo do handler (linha 15), que já monta `{ error: { code, message, details? } }`. Registrar isso é parte do desenho: a ausência de mudança aqui é o que prova o reuso (DEC-15). |
 | `src/middlewares/auth.middleware.ts` | **Nada muda.** As rotas novas compõem `authenticate` (linha 27) e, no replay, `requireRole('ADMIN')` (linha 49), no formato já usado em `src/modules/users/user.routes.ts`:11–17. O universo de papéis segue com dois valores. |
-| `src/routes/index.ts` | O tipo `Controllers` (linha 13) ganha o campo de webhooks e `buildApiRouter` (linha 21) ganha as linhas `router.use('/webhooks', ...)` e `router.use('/admin/webhooks', ...)`; o path de cadastro pendura-se no router de customers (linha 26). |
+| `src/routes/index.ts` | O tipo `Controllers` (linha 13) ganha o campo de webhooks e `buildApiRouter` (linha 21) ganha as linhas `router.use('/webhooks', ...)` e `router.use('/admin/webhooks', ...)`. |
+| `src/modules/customers/customer.routes.ts` | **Delta que fecha o path aninhado.** `POST` e `GET /customers/:customerId/webhooks` (FDD-CONTRATO-01 e -02) penduram-se no router de customers, mas `buildCustomerRouter` recebe **só** `CustomerController` hoje (linhas 10–24) e não tem como montar o controller novo. Os três símbolos de registro mudam juntos: **(1)** `buildCustomerRouter` (linha 12) ganha um segundo parâmetro com o controller de webhooks; **(2)** a chamada em `src/routes/index.ts`:26 passa a repassá-lo; **(3)** o tipo `Controllers` (`src/routes/index.ts`:13) é o que torna esse controller alcançável ali. Sem os três, o par de rotas aninhadas não tem onde ser registrado. |
 | `src/app.ts` | `buildControllers` (linha 26) instancia repository, service e controller do módulo novo e injeta o `prisma` já existente, na mesma ordem dos demais domínios. Nada muda no encadeamento de `buildApp` (linha 55): `/health` (62), `/api/v1` (67), 404 (69) e `errorMiddleware` (73) seguem na ordem atual. |
 | `src/config/database.ts` | **Nada muda no arquivo.** O worker chama `createPrismaClient()` (linha 4) em vez de importar o singleton `prisma` (linha 10), porque `PrismaClient` é por processo (DEC-14). A factory já existe exatamente para isso. |
 | `src/config/env.ts` | O `envSchema` (linha 3) ganha as variáveis do módulo, com `.default()` onde houver padrão, e o `.env.example` é atualizado no mesmo commit. |
