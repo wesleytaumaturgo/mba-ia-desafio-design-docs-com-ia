@@ -1,7 +1,20 @@
 #!/usr/bin/env bash
-# verify.sh v6 — cobre INV-1..INV-4 (invariantes), ADR-1..ADR-4 + EST-2 (bloco 4),
-# RFC-1..RFC-6 (bloco 5), FDD-1..FDD-7 (bloco 6) e PRD-1..PRD-6 + INV-7 (bloco 7).
+# verify.sh v7 — cobre INV-1..INV-4 (invariantes), ADR-1..ADR-4 + EST-2 (bloco 4),
+# RFC-1..RFC-6 (bloco 5), FDD-1..FDD-7 (bloco 6), PRD-1..PRD-6 + INV-7 (bloco 7)
+# e TRK-1..TRK-4 + GER-2 (bloco 8).
 # Ver .planning/01-matriz.md para o restante dos critérios de aceite e seus blocos.
+#
+# v7 (2026-08-19) acrescenta os cinco checks do tracker:
+#   TRK-1 header literal da tabela principal + toda linha de dados com 6
+#   campos · TRK-2 cobertura ≥80% do universo de IDs C-2 extraído dos
+#   DOCUMENTOS (nunca do tracker) · TRK-3 ≥70% das linhas com Fonte=TRANSCRICAO
+#   e toda Localização conferível por grep -F em TRANSCRICAO.md · TRK-4 ≥5
+#   linhas com Fonte=CODIGO e caminho real em git ls-files · GER-2 nenhum
+#   caminho de código citado em README.md/docs/ (recursivo) é inexistente no
+#   repositório, salvo o marcador (novo) de C-1. TRK-1..4 leem $TRACKER_FILE
+#   (default docs/TRACKER.md) e TRK-3 lê $TRANSCRICAO_FILE (default
+#   TRANSCRICAO.md), parametrizáveis para que os testes negativos rodem contra
+#   cópia sob /tmp — ver .planning/08-teste-negativo.md.
 #
 # v6 (2026-08-19) acrescenta os sete checks do PRD:
 #   PRD-1 existência, tamanho mínimo e ausência de placeholder ·
@@ -125,11 +138,13 @@ ADR_DIR="${ADR_DIR:-docs/adrs}"
 RFC_FILE="${RFC_FILE:-docs/RFC.md}"
 FDD_FILE="${FDD_FILE:-docs/FDD.md}"
 PRD_FILE="${PRD_FILE:-docs/PRD.md}"
+TRACKER_FILE="${TRACKER_FILE:-docs/TRACKER.md}"
+TRANSCRICAO_FILE="${TRANSCRICAO_FILE:-TRANSCRICAO.md}"
 
 pass=0
-total=29
+total=34
 
-echo "verify.sh v6 — BASE=$BASE"
+echo "verify.sh v7 — BASE=$BASE"
 echo "engine: $GREP $GREP_VER"
 echo
 
@@ -1084,6 +1099,175 @@ if [ "$inv7_vaz" -eq 0 ]; then
 else
   echo "INV-7 FALHA — $inv7_vaz vazamento(s):"
   printf '%s' "$inv7_saida"
+fi
+
+# ---------------------------------------------------------------------------
+# Seção compartilhada TRK-1..TRK-4: isola a tabela principal do tracker
+# (## Referência cruzada), sem misturar com a tabela de §Itens sem origem
+# identificável, que tem um formato de coluna diferente.
+# ---------------------------------------------------------------------------
+[ -r "$TRACKER_FILE" ] || erro "TRK-1 não consegue ler $TRACKER_FILE"
+
+TRK_HEADER='| ID | Documento | Tipo | Conteúdo (resumo) | Fonte | Localização |'
+TRK_ID_RE='(PRD-FR|PRD-RNF|RFC-ALT|RFC-QA|FDD-CONTRATO|FDD-ERR)-[0-9]{2}|ADR-[0-9]{3}'
+
+trk_secao="$(awk '/^## Referência cruzada$/ {f=1; next} /^## / {f=0} f' "$TRACKER_FILE")"
+[ -n "$trk_secao" ] || erro "TRK-1 encontrou a seção '## Referência cruzada' vazia (ou ausente) em $TRACKER_FILE"
+
+# Linhas de dados: começam com '| ' seguido de um ID que casa o universo C-2.
+# Isso exclui naturalmente o header ('| ID | ...') e o separador ('|---|...').
+trk_linhas_dados="$(printf '%s\n' "$trk_secao" | "$GREP" -E "^\\| *($TRK_ID_RE) *\\|")"
+
+# ---------------------------------------------------------------------------
+# TRK-1: header literal da tabela principal presente, e toda linha de dados
+# com exatamente 6 campos (ID | Documento | Tipo | Conteúdo (resumo) | Fonte |
+# Localização).
+# ---------------------------------------------------------------------------
+trk1_header_ok=0
+printf '%s\n' "$trk_secao" | "$GREP" -qxF "$TRK_HEADER" && trk1_header_ok=1
+
+trk1_linhas=0
+trk1_malformadas=""
+while IFS= read -r _l; do
+  [ -n "$_l" ] || continue
+  trk1_linhas=$((trk1_linhas + 1))
+  _nf="$(printf '%s' "$_l" | awk -F'|' '{print NF}')"
+  [ "$_nf" -eq 8 ] || trk1_malformadas+="  campos=$((_nf - 2)) (esperado 6): $_l"$'\n'
+done <<< "$trk_linhas_dados"
+
+[ "$trk1_linhas" -gt 0 ] || erro "TRK-1 não encontrou nenhuma linha de dados na tabela principal de $TRACKER_FILE"
+
+if [ "$trk1_header_ok" -eq 1 ] && [ -z "$trk1_malformadas" ]; then
+  echo "TRK-1 OK — header literal presente, $trk1_linhas linha(s) de dados, todas com 6 campos"
+  pass=$((pass + 1))
+else
+  echo "TRK-1 FALHA — header literal presente: $([ "$trk1_header_ok" -eq 1 ] && echo sim || echo não); linha(s) malformada(s):"
+  printf '%s' "$trk1_malformadas"
+fi
+
+# ---------------------------------------------------------------------------
+# TRK-2: universo = IDs distintos que casam C-2, extraídos dos DOCUMENTOS
+# (docs/PRD.md docs/RFC.md docs/FDD.md docs/adrs/*.md) — nunca do tracker.
+# Cobertos = presentes na coluna ID da tabela principal do tracker.
+# cobertos/universo >= 0.80.
+# ---------------------------------------------------------------------------
+TRK2_DOCS=(docs/PRD.md docs/RFC.md docs/FDD.md docs/adrs/*.md)
+
+trk2_universo="$("$GREP" -ohE "$TRK_ID_RE" "${TRK2_DOCS[@]}" 2>/dev/null | sort -u)"
+trk2_n_universo="$(printf '%s' "$trk2_universo" | "$GREP" -c . || true)"
+[ "$trk2_n_universo" -gt 0 ] || erro "TRK-2 não encontrou nenhum ID rastreável nos documentos (${TRK2_DOCS[*]})"
+
+trk2_cobertos="$(printf '%s\n' "$trk_linhas_dados" \
+  | awk -F'|' '{gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2}' \
+  | "$GREP" -E "^($TRK_ID_RE)\$" | sort -u)"
+
+trk2_n_cobertos="$(comm -12 <(printf '%s\n' "$trk2_universo") <(printf '%s\n' "$trk2_cobertos") | "$GREP" -c . || true)"
+trk2_faltantes="$(comm -23 <(printf '%s\n' "$trk2_universo") <(printf '%s\n' "$trk2_cobertos"))"
+
+if [ $(( trk2_n_cobertos * 100 )) -ge $(( trk2_n_universo * 80 )) ]; then
+  echo "TRK-2 OK — universo=$trk2_n_universo ID(s) extraído(s) dos documentos, cobertos=$trk2_n_cobertos (mínimo 80%)"
+  pass=$((pass + 1))
+else
+  echo "TRK-2 FALHA — universo=$trk2_n_universo, cobertos=$trk2_n_cobertos (mínimo 80%). ID(s) descoberto(s) sem linha no tracker:"
+  printf '%s\n' "$trk2_faltantes" | sed 's/^/  /'
+fi
+
+# ---------------------------------------------------------------------------
+# TRK-3: linhas com Fonte=TRANSCRICAO / total >= 0.70, e cada Localização
+# dessas linhas encontrada por grep -F em $TRANSCRICAO_FILE — zero não
+# encontradas.
+# ---------------------------------------------------------------------------
+[ -r "$TRANSCRICAO_FILE" ] || erro "TRK-3 não consegue ler $TRANSCRICAO_FILE"
+
+trk3_total=0
+trk3_transcricao=0
+trk3_nao_encontradas=""
+while IFS='|' read -r _b _id _doc _tipo _cont _fonte _loc _e; do
+  [ -n "$(printf '%s' "$_id" | tr -d '[:space:]')" ] || continue
+  trk3_total=$((trk3_total + 1))
+  _fonte_trim="$(printf '%s' "$_fonte" | sed -E 's/^[ \t]+|[ \t]+$//g')"
+  if [ "$_fonte_trim" = "TRANSCRICAO" ]; then
+    trk3_transcricao=$((trk3_transcricao + 1))
+    _id_trim="$(printf '%s' "$_id" | sed -E 's/^[ \t]+|[ \t]+$//g')"
+    _loc_trim="$(printf '%s' "$_loc" | sed -E "s/^[ \\t]+|[ \\t]+\$//g; s/^\`//; s/\`\$//")"
+    "$GREP" -qF "$_loc_trim" "$TRANSCRICAO_FILE" \
+      || trk3_nao_encontradas+="  $_id_trim: $_loc_trim"$'\n'
+  fi
+done <<< "$trk_linhas_dados"
+
+[ "$trk3_total" -gt 0 ] || erro "TRK-3 não encontrou nenhuma linha de dados na tabela principal de $TRACKER_FILE"
+
+if [ $(( trk3_transcricao * 100 )) -ge $(( trk3_total * 70 )) ] && [ -z "$trk3_nao_encontradas" ]; then
+  echo "TRK-3 OK — $trk3_transcricao/$trk3_total linha(s) com Fonte=TRANSCRICAO (mínimo 70%), todas as Localizações conferidas por grep -F em $TRANSCRICAO_FILE (0 não encontrada)"
+  pass=$((pass + 1))
+else
+  echo "TRK-3 FALHA — $trk3_transcricao/$trk3_total linha(s) TRANSCRICAO (mínimo 70%); Localização(ões) não encontrada(s) em $TRANSCRICAO_FILE:"
+  printf '%s' "$trk3_nao_encontradas"
+fi
+
+# ---------------------------------------------------------------------------
+# TRK-4: linhas com Fonte=CODIGO >= 5, cada Localização (sem ':linha')
+# presente em git ls-files, zero ausentes.
+# ---------------------------------------------------------------------------
+trk4_codigo=0
+trk4_ausentes=""
+while IFS='|' read -r _b _id _doc _tipo _cont _fonte _loc _e; do
+  [ -n "$(printf '%s' "$_id" | tr -d '[:space:]')" ] || continue
+  _fonte_trim="$(printf '%s' "$_fonte" | sed -E 's/^[ \t]+|[ \t]+$//g')"
+  if [ "$_fonte_trim" = "CODIGO" ]; then
+    trk4_codigo=$((trk4_codigo + 1))
+    _id_trim="$(printf '%s' "$_id" | sed -E 's/^[ \t]+|[ \t]+$//g')"
+    _loc_trim="$(printf '%s' "$_loc" | sed -E "s/^[ \\t]+|[ \\t]+\$//g; s/^\`//; s/\`\$//")"
+    _path_only="${_loc_trim%%:*}"
+    git ls-files --error-unmatch "$_path_only" >/dev/null 2>&1 \
+      || trk4_ausentes+="  $_id_trim: $_path_only"$'\n'
+  fi
+done <<< "$trk_linhas_dados"
+
+if [ "$trk4_codigo" -ge 5 ] && [ -z "$trk4_ausentes" ]; then
+  echo "TRK-4 OK — $trk4_codigo linha(s) com Fonte=CODIGO (mínimo 5), todos os caminhos presentes em git ls-files (0 ausente)"
+  pass=$((pass + 1))
+else
+  echo "TRK-4 FALHA — $trk4_codigo linha(s) com Fonte=CODIGO (mínimo 5); caminho(s) ausente(s) do índice do git:"
+  printf '%s' "$trk4_ausentes"
+fi
+
+# ---------------------------------------------------------------------------
+# GER-2: nenhum caminho de código citado em crase em README.md ou docs/
+# (recursivo) é inexistente no repositório, salvo o marcador (novo) por C-1.
+# Guarda: menos de 10 caminhos distintos examinados é passagem vazia/truncada.
+# ---------------------------------------------------------------------------
+GER2_README="${GER2_README:-README.md}"
+GER2_DOCS_DIR="${GER2_DOCS_DIR:-docs}"
+
+ger2_arquivos=()
+[ -f "$GER2_README" ] && ger2_arquivos+=("$GER2_README")
+while IFS= read -r _f; do
+  ger2_arquivos+=("$_f")
+done < <(find "$GER2_DOCS_DIR" -type f -name '*.md' | sort)
+
+[ "${#ger2_arquivos[@]}" -gt 0 ] || erro "GER-2 não encontrou README.md nem arquivo algum em docs/ para varrer"
+
+ger2_brutos="$("$GREP" -ohE '`[A-Za-z0-9_./-]+\.(ts|js|prisma|json|sql|yml|yaml)`( *\(novo\))?' "${ger2_arquivos[@]}")"
+ger2_distintos="$(printf '%s\n' "$ger2_brutos" | "$GREP" -v '(novo)' | tr -d '`' | sort -u)"
+ger2_n="$(printf '%s' "$ger2_distintos" | "$GREP" -c . || true)"
+
+[ "$ger2_n" -ge 10 ] \
+  || erro "GER-2 examinou $ger2_n caminho(s) distinto(s) em README.md/docs/ — mínimo 10 (guarda contra varredura vazia ou truncada)"
+
+ger2_ausentes=""
+while IFS= read -r _p; do
+  [ -n "$_p" ] || continue
+  git ls-files --error-unmatch "$_p" >/dev/null 2>&1 \
+    || ger2_ausentes+="  ausente do índice do git e sem o marcador (novo): $_p"$'\n'
+done <<< "$ger2_distintos"
+
+if [ -z "$ger2_ausentes" ]; then
+  echo "GER-2 OK — $ger2_n caminho(s) distinto(s) examinado(s) em README.md/docs/ (sem marcador (novo)), 0 ausente(s) do índice do git"
+  pass=$((pass + 1))
+else
+  echo "GER-2 FALHA — caminho(s) ausente(s) do índice do git e sem o marcador (novo):"
+  printf '%s' "$ger2_ausentes"
 fi
 
 echo
