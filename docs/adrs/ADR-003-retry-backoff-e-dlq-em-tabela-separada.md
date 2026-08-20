@@ -28,10 +28,17 @@ convenções do restante do schema.
 ## Decisão
 
 Uma entrega é submetida a **até 5 tentativas de entrega no total (1 inicial + 4
-retentativas), com backoff exponencial na progressão 1m/5m/30m/2h** — 4
-intervalos, última tentativa 2h36min após a primeira falha. O número de tentativas é o que `[09:17] Larissa` fecha
-("Decidido: 5 tentativas"); a progressão de 4 degraus é a leitura que essa
-decisão impõe (ver §Consequências/Negativas e RFC-QA-05). Esgotadas as
+retentativas), com backoff exponencial na progressão que a ata fecha —
+`1m/5m/30m/2h/12h`** (`[09:17] Larissa`: "Decidido: 5 tentativas, backoff
+1m/5m/30m/2h/12h"). As duas metades da fala são publicadas como ela as disse:
+nenhum degrau é omitido e o teto de 5 tentativas é o mesmo. A aritmética que
+resulta delas é que cinco tentativas consecutivas têm **quatro** espaços entre
+si, de modo que **só os quatro primeiros degraus são consumidos — 1m, 5m, 30m e
+2h** — e a última tentativa cai **2h36min** após a primeira falha. O quinto
+degrau, o de **12h**, só teria uso numa **6ª tentativa**, que a ata não autoriza.
+Este ADR não descarta o 12h nem o executa: publica a progressão inteira, registra
+qual parte dela o teto consome e mantém a leitura pendente de ratificação (ver
+§Consequências/Negativas e RFC-QA-05). Esgotadas as
 tentativas, o evento é registrado numa DLQ em tabela própria,
 `webhook_dead_letter`, que guarda o payload, o motivo da falha e o timestamp. A saída da DLQ é o replay manual por endpoint
 administrativo, que recoloca o evento na outbox como pendente — capacidade pedida
@@ -105,8 +112,11 @@ Manter tudo numa tabela só, distinguindo o evento morto por estado.
   30 minutos, 2 horas, 12 horas"); e o mesmo `[09:17] Diego` conclui "Total de
   quase 15 horas entre primeira falha e última tentativa". Cinco chamadas têm
   quatro intervalos, não cinco — as três afirmações não podem ser todas
-  verdadeiras. Este ADR adota a fala que **fecha** a decisão (5 tentativas) e
-  trata a enumeração e a soma de Diego como observação. Consequência concreta:
+  verdadeiras. Este ADR **publica a progressão como a ata a enunciou**, inclusive
+  o degrau de 12h, e mantém o teto de 5 tentativas que `[09:17] Larissa` fecha;
+  não escolhe uma das leituras em silêncio nem apaga um número dito. Consequência
+  concreta da aritmética: os quatro primeiros degraus são os únicos consumidos, o
+  de 12h ficaria para uma 6ª tentativa que ninguém autorizou, e
   a janela cai de ~15h para **2h36min**, que cobre a indisponibilidade de 2h de
   `[09:16] Diego` com **~36 minutos de margem** — apertado, e bem abaixo da
   janela de "12 ou 24 horas" que `[09:15] Diego` dizia estar mirando. A leitura

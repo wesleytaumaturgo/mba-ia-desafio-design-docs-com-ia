@@ -148,7 +148,7 @@ Adiados para fase futura:
 | PRD-RNF-04 | A fila de eventos pendentes é indexada por status e por data de criação, para leitura eficiente | performance | RNF-04, `[09:08] Diego` |
 | PRD-RNF-05 | A leitura de eventos pendentes processa apenas os ainda não entregues, em lotes pequenos | performance | RNF-05, `[09:08] Diego` |
 | PRD-RNF-06 | Uma entrega tem até 5 tentativas de entrega no total (1 inicial + 4 retentativas) antes de ser movida para a fila de eventos mortos | operação | RNF-07, `[09:17] Larissa` |
-| PRD-RNF-07 | A progressão entre as 5 tentativas de entrega tem 4 intervalos: 1 minuto, 5 minutos, 30 minutos e 2 horas | operação | DEC-05, `[09:17] Larissa` (interpretação — a ata é ambígua, ver RFC-QA-05) |
+| PRD-RNF-07 | A progressão de backoff fechada na reunião é 1 minuto, 5 minutos, 30 minutos, 2 horas e 12 horas; as 5 tentativas de entrega consomem os quatro primeiros intervalos, e o de 12 horas só seria usado por uma 6ª tentativa, que a reunião não autorizou | operação | DEC-05, `[09:17] Larissa` (leitura pendente de ratificação, ver RFC-QA-05) |
 | PRD-RNF-08 | O intervalo total entre a primeira falha e a última tentativa de entrega é de 2 horas e 36 minutos | operação | derivado de PRD-RNF-06 e PRD-RNF-07; ver RFC-QA-05 |
 | PRD-RNF-09 | Após rotação de secret, a secret anterior permanece válida em paralelo por 24 horas | segurança | RNF-13, `[09:21] Sofia` |
 | PRD-RNF-10 | A url de um endpoint de webhook precisa usar TLS | segurança | RNF-14, `[09:23] Sofia` |

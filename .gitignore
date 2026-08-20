@@ -14,6 +14,8 @@ coverage/
 # A entrega é o pacote de documentos; o rastro de produção (notas de bloco e o
 # verificador executável dos critérios de aceite) não é documento entregue.
 # Ficou versionado durante a produção e saiu do índice no fechamento, mas segue
-# preservado no histórico — reproduzível a partir do commit 07f8496.
+# em disco e preservado no histórico. 07f8496 é o último commit em que o
+# verificador esteve versionado; a árvore de lá não é o pacote final. Ver
+# README.md §Como navegar a entrega.
 .planning/
 scripts/

@@ -23,8 +23,9 @@ daqui é falha do tracker, não licença para o leitor adivinhar — e essa cobe
 foi medida por um check dedicado do verificador executável, sobre o mesmo
 universo amplo que um leitor externo enxerga. O verificador também não faz parte
 da árvore entregue — é ferramenta de processo, não documento —, mas está
-preservado no histórico e é reproduzível a partir do commit `07f8496`, como o
-`README.md` §Como navegar a entrega descreve.
+preservado no histórico e continua rodável em disco — `07f8496` é o último commit
+em que ele esteve versionado, não a árvore atual, como o `README.md` §Como navegar
+a entrega detalha.
 
 ## Referência cruzada
 
@@ -47,7 +48,7 @@ preservado no histórico e é reproduzível a partir do commit `07f8496`, como o
 | PRD-RNF-04 | docs/PRD.md | Requisito Não Funcional | Fila indexada por status e created_at | TRANSCRICAO | `[09:08] Diego` |
 | PRD-RNF-05 | docs/PRD.md | Requisito Não Funcional | Leitura processa só pendentes, em lotes pequenos | TRANSCRICAO | `[09:08] Diego` |
 | PRD-RNF-06 | docs/PRD.md | Requisito Não Funcional | Retentativa até 5 vezes antes da DLQ | TRANSCRICAO | `[09:17] Larissa` |
-| PRD-RNF-07 | docs/PRD.md | Requisito Não Funcional | Progressão do backoff: 4 intervalos 1m/5m/30m/2h, imposta pelas 5 tentativas de DEC-05 (leitura adotada; ver RFC-QA-05) | TRANSCRICAO | `[09:17] Larissa` |
+| PRD-RNF-07 | docs/PRD.md | Requisito Não Funcional | Progressão do backoff: 1m/5m/30m/2h/12h como a ata a enunciou; as 5 tentativas de DEC-05 consomem os quatro primeiros degraus e o de 12h exigiria uma 6ª (leitura adotada; ver RFC-QA-05) | TRANSCRICAO | `[09:17] Larissa` |
 | PRD-RNF-08 | docs/PRD.md | Requisito Não Funcional | Janela total entre falha e última tentativa: 2h36min — aritmética derivada de DEC-05, não dita em nenhuma fala (ver RFC-QA-05) | TRANSCRICAO | `[09:17] Larissa` |
 | PRD-RNF-09 | docs/PRD.md | Requisito Não Funcional | Secret anterior válida 24h após rotação | TRANSCRICAO | `[09:21] Sofia` |
 | PRD-RNF-10 | docs/PRD.md | Requisito Não Funcional | URL de webhook precisa usar TLS | TRANSCRICAO | `[09:23] Sofia` |
@@ -72,7 +73,7 @@ preservado no histórico e é reproduzível a partir do commit `07f8496`, como o
 | RFC-QA-02 | docs/RFC.md | Questão em aberto | Nome do arquivo de processamento do worker, não fechado | TRANSCRICAO | `[09:28] Bruno` |
 | RFC-QA-03 | docs/RFC.md | Questão em aberto | Rate limiting por cliente, fora de escopo e em aberto | TRANSCRICAO | `[09:39] Diego` |
 | RFC-QA-04 | docs/RFC.md | Questão em aberto | Ordenação com mais de um worker, sem solução escolhida | TRANSCRICAO | `[09:12] Diego` |
-| RFC-QA-05 | docs/RFC.md | Questão em aberto | Política de retry com três leituras incompatíveis na ata (5 tentativas × 5 intervalos × ~15h); a leitura adotada precisa de ratificação | TRANSCRICAO | `[09:17] Diego` |
+| RFC-QA-05 | docs/RFC.md | Questão em aberto | Política de retry com três leituras incompatíveis na ata (5 tentativas × 5 intervalos × ~15h): o pacote publica a progressão 1m/5m/30m/2h/12h como ela foi dita e consome os quatro primeiros degraus, porque 5 tentativas têm 4 espaços — a soma de ~15h só fecharia com uma 6ª tentativa. A leitura precisa de ratificação | TRANSCRICAO | `[09:17] Diego` |
 | FDD-CONTRATO-01 | docs/FDD.md | Contrato | Forma do path `POST /customers/:customerId/webhooks` (aninhamento sob `/customers`; o verbo e os campos vêm de `[09:31] Marcos`) | CODIGO | `src/routes/index.ts:26` |
 | FDD-CONTRATO-02 | docs/FDD.md | Contrato | Forma do path `GET /customers/:customerId/webhooks` (listagem paginada; o verbo vem de `[09:33] Bruno`) | CODIGO | `src/modules/customers/customer.routes.ts:16` |
 | FDD-CONTRATO-03 | docs/FDD.md | Contrato | Forma do path `PATCH /webhooks/:id` (o verbo vem de `[09:33] Bruno`) | CODIGO | `src/modules/customers/customer.routes.ts:19` |
@@ -99,7 +100,7 @@ preservado no histórico e é reproduzível a partir do commit `07f8496`, como o
 | DEC-02 | docs/adrs/ADR-002-worker-processo-separado-polling.md | Decisão | Worker consome a outbox por polling em loop, a cada 2 segundos; citada também em `docs/FDD.md` e `docs/adrs/README.md` | TRANSCRICAO | `[09:10] Larissa` |
 | DEC-03 | docs/adrs/ADR-002-worker-processo-separado-polling.md | Decisão | Worker roda como processo separado da API, no mesmo banco e mesma stack; citada também em `docs/FDD.md` e `docs/adrs/README.md` | TRANSCRICAO | `[09:11] Diego` |
 | DEC-04 | docs/adrs/ADR-002-worker-processo-separado-polling.md | Decisão | Single-worker: sem garantia de ordering global, só por order_id, e a limitação é documentada; citada também em `docs/RFC.md`, `docs/FDD.md`, ADR-003, ADR-005 e `docs/adrs/README.md` | TRANSCRICAO | `[09:13] Larissa` |
-| DEC-05 | docs/adrs/ADR-003-retry-backoff-e-dlq-em-tabela-separada.md | Decisão | Retry com backoff exponencial: 5 tentativas, progressão 1m/5m/30m/2h/12h, depois DLQ — a leitura adotada no pacote diverge da progressão dita na fala e está registrada em RFC-QA-05; citada também em `docs/PRD.md`, `docs/FDD.md` e `docs/adrs/README.md` | TRANSCRICAO | `[09:17] Larissa` |
+| DEC-05 | docs/adrs/ADR-003-retry-backoff-e-dlq-em-tabela-separada.md | Decisão | Retry com backoff exponencial: 5 tentativas, progressão 1m/5m/30m/2h/12h, depois DLQ — o pacote publica a progressão como a fala a enunciou, inclusive o degrau de 12h; com o teto de 5 tentativas só os quatro primeiros degraus são consumidos, e o de 12h exigiria uma 6ª tentativa que a ata não autoriza (leitura registrada em RFC-QA-05); citada também em `docs/PRD.md`, `docs/FDD.md` e `docs/adrs/README.md` | TRANSCRICAO | `[09:17] Larissa` |
 | DEC-06 | docs/adrs/ADR-003-retry-backoff-e-dlq-em-tabela-separada.md | Decisão | DLQ em tabela separada `webhook_dead_letter`, com payload, motivo da falha e timestamp; citada também em `docs/FDD.md` e `docs/adrs/README.md` | TRANSCRICAO | `[09:18] Bruno` |
 | DEC-07 | docs/adrs/ADR-004-hmac-sha256-secret-por-endpoint.md | Decisão | Assinatura HMAC-SHA256 calculada sobre o corpo do request; citada também em `docs/FDD.md` e `docs/adrs/README.md` | TRANSCRICAO | `[09:22] Sofia` |
 | DEC-08 | docs/adrs/ADR-004-hmac-sha256-secret-por-endpoint.md | Decisão | Secret única por endpoint de webhook, não global da plataforma; citada também em `docs/FDD.md` e `docs/adrs/README.md` | TRANSCRICAO | `[09:22] Sofia` |
@@ -178,7 +179,7 @@ preservado no histórico e é reproduzível a partir do commit `07f8496`, como o
 | DIV-02 | docs/RFC.md | Divergência | A fala nomeia `order_id`, `order_number`, `from_status`, `to_status`, `customer_id` como campos do payload; as colunas são `id`, `orderNumber`, `customerId`, `fromStatus`, `toStatus` — nenhuma das cinco grafias snake_case existe no banco; citada também em `docs/FDD.md` | CODIGO | `prisma/schema.prisma:75` |
 | DIV-03 | docs/RFC.md | Divergência | A fala cita "os campos básicos da order tipo total_cents"; o campo é `totalCents`, `Int`, e existem ainda `subtotalCents` e `discountCents`, não citados; citada também em `docs/FDD.md` | CODIGO | `prisma/schema.prisma:79` |
 | DIV-04 | docs/adrs/ADR-007-insercao-na-outbox-dentro-da-transacao.md | Divergência | A fala diz que a transação "faz update na order, insere no history e atualiza estoque"; a atualização de estoque é condicional à transição — em 4 das 7 transições nenhum produto é tocado | CODIGO | `src/modules/orders/order.service.ts:151` |
-| DIV-05 | docs/RFC.md | Divergência | A fala diz "trigger no banco a gente até tem"; não há trigger algum no repositório — a migration tem só `CREATE TABLE`, `CREATE INDEX` e `ADD FOREIGN KEY`; citada também em ADR-001 e ADR-002 | CODIGO | `prisma/migrations/20260519182739_init/migration.sql` |
+| DIV-05 | docs/RFC.md | Divergência | A fala diz "trigger no banco a gente até tem"; não há trigger algum no repositório — a migration tem só 7 `CREATE TABLE` e 6 `ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY`, com os 15 índices declarados como cláusulas `INDEX` dentro do `CREATE TABLE`; `CREATE INDEX` não ocorre nenhuma vez (`grep -cE '^CREATE INDEX'` → 0), como GAN-11 e ADR-001 registram; citada também em ADR-001 e ADR-002 | CODIGO | `prisma/migrations/20260519182739_init/migration.sql` |
 | DIV-06 | docs/adrs/ADR-002-worker-processo-separado-polling.md | Divergência | A fala diz "o pool de conexão do Prisma já tá lá"; não há configuração de pool em lugar nenhum — o pool existe por default do Prisma, não por configuração do projeto; citada também em `docs/FDD.md` | CODIGO | `src/config/database.ts:4` |
 | DIV-07 | docs/RFC.md | Divergência | A fala supõe "usuários que representam o cliente"; `UserRole` tem só `ADMIN` e `OPERATOR`, e `Customer` é model sem senha, sem papel e sem relação com `User`; citada também em `docs/PRD.md`, `docs/FDD.md` e ADR-008 | CODIGO | `prisma/schema.prisma:11` |
 | DIV-08 | docs/RFC.md | Divergência | A fala diz que os clientes "ficam batendo no GET /orders"; o router de orders é precedido por `router.use(authenticate)`, que só aceita JWT de usuário interno — cliente externo não tem credencial hoje; citada também em `docs/PRD.md`, `docs/FDD.md` e ADR-001 | CODIGO | `src/modules/orders/order.routes.ts:14` |

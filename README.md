@@ -206,12 +206,31 @@ Ordem sugerida de leitura, do mais alto nível ao mais detalhado:
 
 **Reproduzindo a verificação.** O verificador executável dos critérios de aceite
 não faz parte da árvore entregue — é ferramenta de processo, não documento —,
-mas está preservado no histórico. Para rodar os 38 checks sobre o pacote final:
+mas continua rodável em disco e está preservado no histórico. Rodando na árvore
+de trabalho atual:
+
+```
+./scripts/verify.sh
+```
+
+No `HEAD` isso dá **37/38**. A única falha é o `INV-1`, que acusa a alteração do
+`.gitignore` feita deliberadamente em `1bf09ee` para tirar `scripts/` e
+`.planning/` da árvore entregue: o check compara o work tree com a base e o
+`.gitignore` está fora do conjunto de caminhos permitidos. É o verificador
+relatando uma mudança real e intencional, não um documento fora de conformidade
+— os 37 checks de conteúdo (PRD, RFC, FDD, ADRs, Tracker, README e invariantes)
+passam.
+
+Para rodar a versão versionada do script:
 
 ```
 git worktree add /tmp/repro 07f8496
 cd /tmp/repro && ./scripts/verify.sh
 ```
 
-`07f8496` é o único commit que reúne as duas coisas: o pacote já corrigido e o
-verificador ainda versionado.
+`07f8496` é o **último commit em que `scripts/verify.sh` esteve versionado**, e
+ali o verificador dava **38/38**. Esse commit não é o pacote final: os documentos
+foram corrigidos depois dele, em `d92b96c`, `9129be7`, `d96394f` e nos commits
+seguintes de correção de auditoria. O que o worktree reproduz é o script e a
+árvore daquele momento — para verificar o pacote como ele está hoje, use o
+comando de cima, na árvore atual.

@@ -44,9 +44,10 @@ em `src/modules/webhooks/webhook.processor.ts` (novo)
   secret única por endpoint cadastrado (DEC-07, DEC-08).
 - Aplicar timeout de 10 segundos por tentativa de entrega e tratar o estouro como
   falha (DEC-23).
-- Aplicar até 5 tentativas de entrega no total (1 inicial + 4 retentativas), com
-  a progressão 1m/5m/30m/2h entre elas, e mover o evento para a dead-letter queue
-  quando as tentativas se esgotarem (DEC-05, DEC-06).
+- Aplicar até 5 tentativas de entrega no total (1 inicial + 4 retentativas) sobre
+  a progressão 1m/5m/30m/2h/12h fechada na ata — as cinco tentativas consomem os
+  quatro primeiros degraus, ver §Retry —, e mover o evento para a dead-letter
+  queue quando as tentativas se esgotarem (DEC-05, DEC-06).
 - Recusar payload que ultrapasse 64KB, com erro (RNF-17).
 - Expor os últimos 100 envios de cada endpoint, com sucesso/falha, payload,
   response e tempo de resposta (RF-07, RNF-19).
@@ -128,11 +129,16 @@ em `docs/RFC.md` §Questões em aberto.
   transação descrita para inserir na DLQ e marcar a origem, nem controle que
   impeça dois replays simultâneos. Morde na duplicidade e na divergência entre as
   duas tabelas (RFC-QA-11). Decide: arquitetura.
-- **Classificação de falha de entrega** — a reunião tratou falha permanente como
-  esgotamento de tentativas (`[09:15] Diego`) e fechou só o timeout
-  (`[09:42] Diego`); nenhuma fala distingue resposta 4xx definitiva de 5xx
-  transitória. Morde no custo de retentar o que não se recupera (RFC-QA-12).
-  Decide: arquitetura.
+- **Distinção entre 4xx permanente e 5xx transitório** — a classificação de falha
+  de entrega **este FDD já resolve**: toda resposta fora da faixa 2xx, além de
+  erro de conexão e estouro do timeout, é falha retentável (§Retry, FDD-ERR-12) —
+  *(decisão de desenho deste FDD, sem origem na reunião — ver RFC-QA-12)*. O que
+  fica aberto é o recorte dentro dessa regra: a reunião tratou falha permanente
+  como esgotamento de tentativas (`[09:15] Diego`) e fechou só o timeout
+  (`[09:42] Diego`); nenhuma fala distingue um 4xx definitivo de um 5xx
+  transitório, e falta decidir se o 4xx permanente deve sair da política de
+  retentativa em vez de consumir a janela inteira. Morde no custo de retentar o
+  que não se recupera (RFC-QA-12). Decide: arquitetura.
 - **Caminho para o operador descobrir o `:id` do replay** — nenhum dos sete
   contratos expõe listagem da dead-letter queue. Morde na operabilidade de RF-08:
   o endpoint de replay existe e não há como saber o que replayar.
@@ -222,9 +228,12 @@ no pior caso. Aceitamos." —, porque "mínima" e "pior caso" não descrevem o m
 número; a leitura adotada aqui é a de teto. De um jeito ou de outro cabe folgada
 na régua de "abaixo de 10 segundos" que os clientes deram (RNF-01).
 
-Worker único: não há garantia de ordenação global, apenas por `order_id` e
-enquanto o processo for um só (DEC-04). Isso é limitação contratada, e está no
-contrato porque escalar o worker é questão em aberto (RFC-QA-04).
+Worker único: não há garantia de ordenação global, apenas por `order_id`,
+enquanto o processo for um só (DEC-04) **e enquanto não houver retentativa em
+curso para aquele pedido** — a seleção por `nextAttemptAt` acima é o que estreita
+o alcance declarado em DEC-04, e o ponto está desenvolvido em §Estratégias de
+resiliência/Ordenação. Isso é limitação contratada, e está no contrato porque
+escalar o worker é questão em aberto (RFC-QA-04).
 
 ### Retry
 
@@ -233,28 +242,47 @@ Toda falha de entrega — resposta não-2xx, erro de conexão ou estouro do time
 aqui é só o timeout** — `[09:42] Diego`: "Cliente lento que não responde em 10s a
 gente trata como falha e marca pra retry" (DEC-23, RNF-22). Nenhuma fala separa
 uma resposta 4xx definitiva de uma 5xx transitória, de modo que tratar **toda**
-resposta fora da faixa 2xx como falha retentável é **(decisão de desenho deste
-FDD, sem origem na reunião)** — a classificação continua aberta em §Não decidido
-na reunião e em RFC-QA-12. São **até 5
-tentativas de entrega no total (1 inicial + 4 retentativas)** e, portanto,
-**4 intervalos**: **1 minuto, 5 minutos, 30 minutos, 2 horas**
-(DEC-05, `[09:17] Larissa`) — *(interpretação — a ata é ambígua, ver RFC-QA-05)*.
-A última tentativa cai **2h36min** após a primeira falha, o que cobre a
-indisponibilidade de duas horas em manutenção planejada já observada em cliente
-(RNF-11) com 36 minutos de margem.
+resposta fora da faixa 2xx como falha retentável é *(decisão de desenho deste
+FDD, sem origem na reunião — ver RFC-QA-12)*. O que continua aberto não é a
+classificação, e sim o recorte de 4xx permanente contra 5xx transitório dentro
+dela — ver §Não decidido na reunião.
+
+**A progressão de backoff fechada na ata é `1m/5m/30m/2h/12h`** —
+`[09:17] Diego`: "Eu pensei em 1 minuto, 5 minutos, 30 minutos, 2 horas, 12
+horas", ratificada por `[09:17] Larissa`: "Decidido: 5 tentativas, backoff
+1m/5m/30m/2h/12h" (DEC-05). São cinco degraus enunciados e **até 5 tentativas de
+entrega no total (1 inicial + 4 retentativas)** — o teto que a mesma fala fecha.
+Cinco tentativas consecutivas têm **quatro** espaços entre elas, então **só os
+quatro primeiros degraus são consumidos: 1 minuto, 5 minutos, 30 minutos e 2
+horas**. O quinto degrau, o de **12 horas**, só teria uso numa **6ª tentativa**,
+que nenhuma fala autoriza. Nada aqui descarta o 12h e nada o executa: ele fica
+publicado como parte da progressão da ata, sem consumo, e a leitura permanece
+aberta para ratificação em **RFC-QA-05** — é o mesmo ponto que a soma "quase 15
+horas" de `[09:17] Diego` só fecharia com o degrau de 12h consumido.
+
+Com os quatro degraus consumidos, a última tentativa cai **2h36min** após a
+primeira falha, o que cobre a indisponibilidade de duas horas em manutenção
+planejada já observada em cliente (RNF-11) com 36 minutos de margem — e fica bem
+abaixo da janela de "12 ou 24 horas" que `[09:15] Diego` dizia mirar.
 
 ```
+progressão fechada na ata (DEC-05):   1m   5m   30m   2h   12h
+                                      └────┴─────┴─────┘    └── sobra: só uma
+                                      4 degraus consumidos       6ª tentativa
+                                      pelas 5 tentativas         o consumiria
+
 tentativa 1 falha → +1m  → tentativa 2 falha → +5m  → tentativa 3 falha
    → +30m → tentativa 4 falha → +2h → tentativa 5 falha → DLQ
 ```
 
-| Tentativa | Instante após a primeira falha |
-|---|---|
-| 1 | 0 (a falha que abre a série) |
-| 2 | +1m |
-| 3 | +6m |
-| 4 | +36m |
-| 5 | +2h36m |
+| Tentativa | Degrau que a precede | Instante após a primeira falha |
+|---|---|---|
+| 1 | — (a falha que abre a série) | 0 |
+| 2 | 1m | +1m |
+| 3 | 5m | +6m |
+| 4 | 30m | +36m |
+| 5 | 2h | +2h36m |
+| *(6ª — não existe)* | *12h, degrau não consumido* | *(+14h36m, se a ata autorizasse)* |
 
 Esgotada a 5ª, a linha vai para a DLQ sem espera adicional.
 
@@ -706,8 +734,8 @@ motivo de cada retirada está em `docs/TRACKER.md` §Códigos retirados.
 |---|---|---|
 | Timeout do HTTP call do worker | 10 segundos | DEC-23, RNF-22 |
 | Tentativas antes da fila de morte | até 5 no total (1 inicial + 4 retentativas) | DEC-05, `[09:17] Larissa` |
-| Progressão do backoff | 1m · 5m · 30m · 2h (4 intervalos) | DEC-05, `[09:17] Larissa` |
-| Janela total coberta | 2h36min | derivada da progressão; ver RFC-QA-05 |
+| Progressão do backoff | 1m · 5m · 30m · 2h · 12h na ata; 5 tentativas consomem os 4 primeiros degraus (1m · 5m · 30m · 2h) | DEC-05, `[09:17] Larissa` |
+| Janela total coberta | 2h36min — o degrau de 12h não é consumido; exigiria uma 6ª tentativa | derivada da progressão; ver RFC-QA-05 |
 | Limite de tamanho do corpo | 64KB | RNF-17 |
 | Grace period da secret anterior | 24 horas | DEC-09, RNF-13 |
 | Intervalo de polling | 2 segundos | DEC-02, RNF-02 |
@@ -719,9 +747,11 @@ evento entra na política de retentativa. O valor não é arredondado nem deriva
 o número dito na reunião.
 
 **Retentativa e fila de morte.** Até 5 tentativas de entrega no total (1 inicial
-+ 4 retentativas), na progressão fixa acima, e
-depois `webhook_dead_letter`, com payload, motivo da falha e timestamp (DEC-06). A
-progressão é literal — nenhum termo foi acrescentado para "fechar" a curva.
++ 4 retentativas), sobre a progressão `1m/5m/30m/2h/12h` fechada na ata, e depois
+`webhook_dead_letter`, com payload, motivo da falha e timestamp (DEC-06). A
+progressão é literal — nenhum termo foi acrescentado nem suprimido para "fechar"
+a curva; o que o teto de 5 tentativas produz é que o degrau de 12h não chega a ser
+consumido (§Retry, RFC-QA-05).
 
 **Limite de tamanho.** Corpo renderizado acima de 64KB é recusado com erro
 (FDD-ERR-10). É falha terminal, não retentável.
@@ -731,8 +761,17 @@ evento duas vezes (RNF-18) e deduplica pelo `X-Event-Id`. A garantia é do contr
 não um efeito colateral — a marcação de `DELIVERED` acontece depois do envio, e um
 crash entre o envio e a marcação produz reenvio.
 
-**Ordenação.** Garantida por `order_id` enquanto o worker for único (DEC-04). Não
-há garantia global.
+**Ordenação.** Não há garantia global. O alcance que a reunião declarou é o de
+DEC-04 — `[09:13] Larissa`: "Não é garantia de ordering global, só por order_id e
+enquanto for single-worker". Esse alcance **não se sustenta inteiro**, e isso é
+descoberta da análise do algoritmo, não fala de ninguém (ADR-002
+§Consequências/Negativas): o worker só elege linhas com `nextAttemptAt` vencido,
+então o evento que falhou e entrou em backoff sai do conjunto elegível e o
+seguinte do mesmo pedido passa na frente dele — com um worker só. A garantia real
+é mais estreita: **a ordem por `order_id` vale enquanto o worker for único e não
+houver retentativa em curso para aquele pedido**; a primeira falha de entrega já a
+quebra. Se essa ordem é contrato ou best-effort é decisão pendente (RFC-QA-07,
+§Não decidido na reunião), e o risco está na §Riscos e mitigação.
 
 **Rajada.** O cenário citado foi de 50 pedidos mudando de status em um minuto para
 um cliente (RNF-21). Com polling de 2 segundos e batch pequeno, isso é fila, não
@@ -885,7 +924,10 @@ precisa considerar isso.
 - Após 5 falhas, a linha aparece em `webhook_dead_letter` com payload, motivo e
   timestamp, e não é mais lida pelo worker.
 - Os 4 intervalos entre as 5 tentativas consecutivas são 1m, 5m, 30m e 2h, nessa
-  ordem, e a 5ª tentativa ocorre 2h36min após a primeira falha.
+  ordem — os quatro primeiros degraus da progressão `1m/5m/30m/2h/12h` fechada em
+  DEC-05 —, e a 5ª tentativa ocorre 2h36min após a primeira falha. O degrau de 12h
+  não é exercido por nenhuma tentativa: consumi-lo exigiria uma 6ª, que o teto de
+  DEC-05 não autoriza (RFC-QA-05).
 - Corpo renderizado acima de 64KB não é enviado e vai direto para a dead-letter
   queue, com `WEBHOOK_PAYLOAD_TOO_LARGE` como motivo.
 - Toda entrega leva os headers `X-Event-Id`, `X-Signature`, `X-Timestamp`,
