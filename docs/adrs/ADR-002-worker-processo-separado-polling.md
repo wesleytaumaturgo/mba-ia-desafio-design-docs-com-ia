@@ -138,7 +138,8 @@ reduzir o número de queries contra o MySQL.
   um segundo processo Node dobra o número de conexões default contra o MySQL sem
   que ninguém tenha dimensionado o limite — o dimensionamento vira trabalho novo,
   não herdado.
-- Latência mínima de 2 segundos mesmo com tudo saudável, e polling constante
+- Até 2 segundos de espera de agendamento antes da primeira tentativa mesmo com
+  tudo saudável — teto do componente, não piso da entrega —, e polling constante
   contra o MySQL mesmo quando não há evento nenhum para entregar: o custo de
   leitura é pago por ciclo, não por evento.
 - Um segundo processo para empacotar, subir, supervisionar e observar. O

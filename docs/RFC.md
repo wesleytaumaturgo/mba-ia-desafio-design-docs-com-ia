@@ -17,10 +17,10 @@ do próprio backend, sem infraestrutura adicional. O evento nasce dentro da
 transação que já altera o status, é gravado numa tabela outbox no MySQL que o
 projeto já usa e é entregue por um worker em processo separado, que consome a
 outbox por polling e assina cada envio. Falha de entrega entra numa política de
-retry finita; esgotadas as tentativas, o evento vai para uma dead-letter queue
-com replay administrativo. O público é o cliente B2B integrador — que hoje,
-ressalve-se, não descobre mudança de status de forma nenhuma: a consulta
-repetida que a reunião pressupôs não está aberta a ele (DIV-08, abaixo).
+retry finito; esgotadas as tentativas, o evento vai para uma dead-letter queue
+com replay administrativo. O público é o cliente B2B integrador — que hoje não
+descobre mudança de status de forma nenhuma, porque a consulta repetida que a
+reunião pressupôs não está aberta a ele (DIV-08, abaixo).
 
 Em uma frase: **outbox transacional no banco que já temos, consumida por um
 worker separado que entrega assinado, com retry finito e DLQ.**
@@ -64,33 +64,33 @@ demanda; muda o baseline com que ela é comparada.
 
 Cada decisão estruturante em uma frase, com o ADR que a detalha:
 
-- O evento é persistido como linha de uma tabela outbox no MySQL já existente, em
-  vez de trafegar por infraestrutura de mensageria nova —
+- O evento é persistido como linha de uma tabela outbox no MySQL já existente,
+  sem infraestrutura de mensageria nova —
   [ADR-001](adrs/ADR-001-outbox-no-mysql.md).
-- Essa gravação acontece **dentro** da transação que muda o status, de modo que
-  o rollback do status implique o rollback do evento —
+- Essa gravação acontece **dentro** da transação que muda o status: rollback do
+  status é rollback do evento —
   [ADR-007](adrs/ADR-007-insercao-na-outbox-dentro-da-transacao.md).
 - O consumo é feito por um worker em processo separado da API, com cliente de
   banco próprio, lendo a outbox por polling —
   [ADR-002](adrs/ADR-002-worker-processo-separado-polling.md).
-- Entrega que falha entra numa política de retry finita com backoff exponencial e
-  termina numa DLQ em tabela separada, com replay manual —
+- Entrega que falha entra em retry finito com backoff exponencial e termina numa
+  DLQ em tabela separada, com replay manual —
   [ADR-003](adrs/ADR-003-retry-backoff-e-dlq-em-tabela-separada.md).
-- Toda entrega vai assinada em HMAC-SHA256, com secret única por endpoint
-  cadastrado e suporte a rotação —
+- Toda entrega vai assinada em HMAC-SHA256, com secret única por endpoint e
+  suporte a rotação —
   [ADR-004](adrs/ADR-004-hmac-sha256-secret-por-endpoint.md).
 - A garantia contratada é at-least-once, com identificador de evento em header
   para o cliente deduplicar —
   [ADR-005](adrs/ADR-005-entrega-at-least-once-com-x-event-id.md).
-- O módulo nasce dentro do padrão de módulos do projeto e reusa erro, log,
-  validação e convenções existentes, sem estrutura própria —
+- O módulo nasce no padrão de módulos do projeto e reusa erro, log, validação e
+  convenções existentes —
   [ADR-006](adrs/ADR-006-reuso-dos-padroes-existentes.md).
-- Gestão de endpoints fica atrás da autenticação já existente e o replay da DLQ
-  exige role administrativa, reaproveitando o guarda de papel do projeto —
+- Gestão de endpoints fica atrás da autenticação já existente; o replay da DLQ
+  exige role administrativa, pelo guarda de papel do projeto —
   [ADR-008](adrs/ADR-008-modelo-de-autorizacao-do-modulo.md).
 
-Capacidades que o cliente ganha, uma linha por capacidade: cadastrar um endpoint
-de webhook e receber a secret na criação; editar, remover e listar seus
+Capacidades que o cliente ganha, uma por linha: cadastrar um endpoint de webhook
+e receber a secret na criação; editar, remover e listar seus
 endpoints; declarar quais status quer ouvir; pedir rotação da secret; consultar o
 histórico recente de entregas. Formato de requisição, resposta e erro são
 matéria do FDD.
@@ -174,10 +174,12 @@ cliente.
 | RFC-QA-09 | Que restrições a url do cliente sofre além de exigir `https` | `[09:23] Sofia` fecha só o TLS; faixa de IP, loopback, DNS e redirects não foram citados | ninguém na reunião | Worker vira cliente HTTP para endereço interno escolhido por terceiro |
 | RFC-QA-10 | Colunas, nulabilidade, uniques e FKs dos três models além da outbox | A ata nomeia as tabelas, não o formato delas | ninguém na reunião | A migration não é escrevível a partir do texto |
 | RFC-QA-11 | Que transação e concorrência cercam `outbox → DLQ` e `DLQ → nova outbox` | A ata fecha a atomicidade de outra escrita (`[09:40] Bruno`) e não volta ao assunto | ninguém na reunião | Dois replays simultâneos duplicam o evento; falha no meio diverge as tabelas |
+| RFC-QA-12 | Que resposta do cliente é falha retentável e qual é terminal | A ata fecha só o timeout (`[09:42] Diego`); 4xx e 5xx nunca foram separados | ninguém na reunião | Retentar por 2h36 um 4xx que não se recupera |
+| RFC-QA-13 | Se a secret pode ser lida fora da criação e da rotação | A ata manda devolvê-la nas duas (`[09:31] Marcos`, `[09:21] Sofia`) e cala sobre o resto | ninguém na reunião | Secret legível em consulta anula a secret por endpoint |
 
 `RFC-QA-01` e `RFC-QA-02` são as duas que o FDD resolve **provisoriamente**
-para escrever o contrato. `RFC-QA-06` a `RFC-QA-11` não têm origem na reunião —
-é a definição delas — e estão no tracker em §Itens sem origem identificável.
+para escrever o contrato. `RFC-QA-06` a `RFC-QA-13` não têm origem na reunião —
+é a definição delas.
 
 ## Impacto e riscos
 
@@ -186,28 +188,23 @@ status ganha mais uma escrita. Um defeito ali não degrada webhooks, derruba
 mudança de status de pedido. Forma e mitigação estão em
 [ADR-007](adrs/ADR-007-insercao-na-outbox-dentro-da-transacao.md).
 
-O segundo risco é de premissa, não de código. A reunião trabalhou sobre um
-retrato do repositório que o disco só confirma em parte: a rota de consulta que
-os clientes usariam está fechada a usuário interno (DIV-08) e não há usuário que
-represente o cliente (DIV-07). Nenhuma das duas coisas bloqueia esta proposta,
-mas as duas afetam quem consegue usar o resultado, e a resposta não está neste
-documento.
+O segundo risco é de premissa, não de código: a ressalva de DIV-08 e DIV-07
+registrada em §Contexto e problema não bloqueia esta proposta, mas afeta quem
+consegue usar o resultado, e a resposta não está neste documento.
 
 Terceiro, a mudança de status não é o único ponto que produz transição no
-histórico do pedido: a criação do pedido grava a transição inicial por um
-caminho separado (DIV-11), e o enum de status tem valores que ninguém citou na
-reunião (DIV-12). O pacote de eventos, portanto, precisa dizer explicitamente
-quais transições emitem evento — o padrão silencioso seria emitir menos do que o
-cliente espera.
+histórico: a criação do pedido grava a transição inicial por outro caminho
+(DIV-11) e o enum tem valores que ninguém citou (DIV-12). O pacote precisa dizer
+explicitamente quais transições emitem evento — o silêncio emitiria menos do que
+o cliente espera.
 
-Os pontos restantes não são defeito, são fronteira: divergências de vocabulário
-e de convenção entre o que a reunião falou e o que o schema usa (DIV-01, DIV-02,
-DIV-03, DIV-10). Nenhuma pede decisão de arquitetura, e todas são resolvidas
-campo a campo no FDD.
+Os pontos restantes são fronteira, não defeito: divergências de vocabulário e de
+convenção entre a reunião e o schema (DIV-01, DIV-02, DIV-03, DIV-10), nenhuma
+pedindo decisão de arquitetura e todas resolvidas campo a campo no FDD.
 
 A equipe assume: que o volume cabe em um worker único; que polling num banco
-relacional atende a régua de dez segundos; e que o cliente implementa
-deduplicação do seu lado, que é o contrato at-least-once.
+relacional atende a régua de dez segundos; e que o cliente deduplica do seu
+lado, que é o contrato at-least-once.
 
 ## Decisões relacionadas
 

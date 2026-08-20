@@ -116,9 +116,12 @@ quando uma linha entrasse.
   segue o desvio decidido em ADR-007. O custo é concreto: a primeira revisão de
   código da feature discute arquitetura, não implementação.
 - A entrega passa a depender de leitura periódica da tabela, e não de
-  notificação: a latência mínima é o intervalo de polling, aceita em
-  `[09:10] Larissa` — "A latência mínima vai ser 2 segundos no pior caso.
-  Aceitamos." (custo detalhado em ADR-002).
+  notificação: o intervalo de polling acrescenta **até 2 segundos** de espera de
+  agendamento antes da primeira tentativa — a espera varia entre quase zero e o
+  ciclo inteiro, e 2s é o teto desse componente, não um piso da entrega. O custo
+  foi aceito em `[09:10] Larissa` — "A latência mínima vai ser 2 segundos no pior
+  caso. Aceitamos." —, fala que a ata deixou ambígua: "mínima" e "pior caso" não
+  descrevem o mesmo número (custo detalhado em ADR-002).
 - A outbox cresce sem limpeza automática. O arquivamento das linhas já entregues
   foi declarado fora do escopo desta feature — `[09:08] Diego`: "Linhas entregues
   a gente arquiva depois de 30 dias ou assim, fora do escopo dessa feature."

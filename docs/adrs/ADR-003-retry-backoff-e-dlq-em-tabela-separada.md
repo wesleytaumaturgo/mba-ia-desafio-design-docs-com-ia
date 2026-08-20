@@ -27,9 +27,9 @@ convenções do restante do schema.
 
 ## Decisão
 
-Uma entrega falha é submetida a **5 tentativas, com backoff exponencial na
-progressão 1m/5m/30m/2h** — 5 chamadas, 4 intervalos, última tentativa 2h36min
-após a primeira falha. O número de tentativas é o que `[09:17] Larissa` fecha
+Uma entrega é submetida a **até 5 tentativas de entrega no total (1 inicial + 4
+retentativas), com backoff exponencial na progressão 1m/5m/30m/2h** — 4
+intervalos, última tentativa 2h36min após a primeira falha. O número de tentativas é o que `[09:17] Larissa` fecha
 ("Decidido: 5 tentativas"); a progressão de 4 degraus é a leitura que essa
 decisão impõe (ver §Consequências/Negativas e RFC-QA-05). Esgotadas as
 tentativas, o evento é registrado numa DLQ em tabela própria,

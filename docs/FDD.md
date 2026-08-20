@@ -43,9 +43,9 @@ em `src/modules/webhooks/webhook.processor.ts` (novo)
   secret única por endpoint cadastrado (DEC-07, DEC-08).
 - Aplicar timeout de 10 segundos por tentativa de entrega e tratar o estouro como
   falha (DEC-23).
-- Retentar entrega falha 5 vezes, com a progressão 1m/5m/30m/2h, e mover o
-  evento para a dead-letter queue quando as tentativas se esgotarem (DEC-05,
-  DEC-06).
+- Aplicar até 5 tentativas de entrega no total (1 inicial + 4 retentativas), com
+  a progressão 1m/5m/30m/2h entre elas, e mover o evento para a dead-letter queue
+  quando as tentativas se esgotarem (DEC-05, DEC-06).
 - Recusar payload que ultrapasse 64KB, com erro (RNF-17).
 - Expor os últimos 100 envios de cada endpoint, com sucesso/falha, payload,
   response e tempo de resposta (RF-07, RNF-19).
@@ -114,9 +114,10 @@ em `docs/RFC.md` §Questões em aberto.
   `https`. Morde na superfície de saída: faixa de IP, loopback, resolução de DNS
   e redirects não têm regra (RFC-QA-09). Decide: segurança.
 - **Ciclo de vida do `DELETE` de endpoint com eventos pendentes** — soft delete,
-  bloqueio, cancelamento das pendências e `onDelete` das chaves estrangeiras não
-  foram escolhidos. Morde na consistência entre configuração e fila.
-  Decide: produto, com arquitetura.
+  bloqueio, cancelamento das pendências, sobrevivência do histórico de entregas e
+  `onDelete` das chaves estrangeiras não foram escolhidos. `[09:33] Bruno` pede o
+  `DELETE` e não diz o que ele leva junto. Morde na consistência entre
+  configuração e fila. Decide: produto, com arquitetura.
 - **Schema completo de `WebhookEndpoint`, `WebhookDelivery` e
   `WebhookDeadLetter`** — este documento detalhou só `WebhookOutbox`; tipo,
   tamanho, nulabilidade, uniques e relações dos outros três não têm origem. Morde
@@ -127,9 +128,10 @@ em `docs/RFC.md` §Questões em aberto.
   impeça dois replays simultâneos. Morde na duplicidade e na divergência entre as
   duas tabelas (RFC-QA-11). Decide: arquitetura.
 - **Classificação de falha de entrega** — a reunião tratou falha permanente como
-  esgotamento de tentativas (`[09:15] Diego`); nenhuma fala distingue resposta
-  4xx definitiva de 5xx transitória. Morde no custo de retentar o que não se
-  recupera. Decide: arquitetura.
+  esgotamento de tentativas (`[09:15] Diego`) e fechou só o timeout
+  (`[09:42] Diego`); nenhuma fala distingue resposta 4xx definitiva de 5xx
+  transitória. Morde no custo de retentar o que não se recupera (RFC-QA-12).
+  Decide: arquitetura.
 - **Caminho para o operador descobrir o `:id` do replay** — nenhum dos sete
   contratos expõe listagem da dead-letter queue. Morde na operabilidade de RF-08:
   o endpoint de replay existe e não há como saber o que replayar.
@@ -210,9 +212,14 @@ A leitura é só de pendentes, em batch pequeno (RNF-05). O tamanho do batch **n
 foi fixado na reunião**: entra como variável de ambiente, e o valor é decisão da
 implementação — lacuna declarada, não número inventado aqui.
 
-A latência mínima aceita é de 2 segundos no pior caso (RNF-03), consequência
-direta do intervalo de polling, e cabe folgada na régua de "abaixo de 10 segundos"
-que os clientes deram (RNF-01).
+O intervalo de polling acrescenta **até 2 segundos** de espera de agendamento
+antes da primeira tentativa (RNF-03): a linha inserida logo depois de um ciclo
+espera quase o ciclo inteiro, e a inserida logo antes do próximo espera quase
+nada — 2s é o **teto** desse componente, não o piso da entrega. A ata formulou o
+ponto de forma ambígua — `[09:10] Larissa`: "A latência mínima vai ser 2 segundos
+no pior caso. Aceitamos." —, porque "mínima" e "pior caso" não descrevem o mesmo
+número; a leitura adotada aqui é a de teto. De um jeito ou de outro cabe folgada
+na régua de "abaixo de 10 segundos" que os clientes deram (RNF-01).
 
 Worker único: não há garantia de ordenação global, apenas por `order_id` e
 enquanto o processo for um só (DEC-04). Isso é limitação contratada, e está no
@@ -221,8 +228,15 @@ contrato porque escalar o worker é questão em aberto (RFC-QA-04).
 ### Retry
 
 Toda falha de entrega — resposta não-2xx, erro de conexão ou estouro do timeout de
-10 segundos — incrementa `attempts` e agenda `nextAttemptAt`. São **5 chamadas no
-total** e, portanto, **4 intervalos**: **1 minuto, 5 minutos, 30 minutos, 2 horas**
+10 segundos — incrementa `attempts` e agenda `nextAttemptAt`. **O que a ata fecha
+aqui é só o timeout** — `[09:42] Diego`: "Cliente lento que não responde em 10s a
+gente trata como falha e marca pra retry" (DEC-23, RNF-22). Nenhuma fala separa
+uma resposta 4xx definitiva de uma 5xx transitória, de modo que tratar **toda**
+resposta fora da faixa 2xx como falha retentável é **(decisão de desenho deste
+FDD, sem origem na reunião)** — a classificação continua aberta em §Não decidido
+na reunião e em RFC-QA-12. São **até 5
+tentativas de entrega no total (1 inicial + 4 retentativas)** e, portanto,
+**4 intervalos**: **1 minuto, 5 minutos, 30 minutos, 2 horas**
 (DEC-05, `[09:17] Larissa`) — *(interpretação — a ata é ambígua, ver RFC-QA-05)*.
 A última tentativa cai **2h36min** após a primeira falha, o que cobre a
 indisponibilidade de duas horas em manutenção planejada já observada em cliente
@@ -273,10 +287,15 @@ linha antiga é o registro histórico da falha e não é reescrita. A linha nova
 **preserva o `event_id` do evento original** — ela é outra linha, não outro
 evento. Se recebesse `event_id` novo, o cliente veria o replay como um evento
 inédito e o `X-Event-Id` deixaria de ser a chave estável de deduplicação que
-DEC-10 contratou (ADR-005); é por isso que `event_id` é campo copiado, e não o
-id da linha (ver §Mapeamento payload ↔ schema). O item da DLQ é
-marcado como já reprocessado, e uma segunda tentativa de replay sobre o mesmo item
-é recusada.
+DEC-10 contratou (ADR-005). A preservação só é escrevível porque `eventId` é
+**campo próprio** da linha, separado de `id` — ver §Mapeamento payload ↔ schema e
+a lista de campos em §Integração com o sistema existente.
+
+**Concorrência de replay: não decidida.** Nem a atomicidade entre inserir a nova
+linha de outbox e registrar o replay no item da DLQ, nem o controle que impediria
+dois replays simultâneos do mesmo item têm origem na reunião — `[09:18] Diego`
+fecha só "Recoloca na outbox como pendente". A lacuna está declarada em §Não decidido
+na reunião e em RFC-QA-11; nada aqui a preenche.
 
 Exige role `ADMIN`, reaproveitando `requireRole` (DEC-19), e registra quem
 executou, para auditoria (RNF-20).
@@ -342,7 +361,6 @@ nas demais respostas ela não trafega.
 **Status:** 201 — endpoint criado.
 **Status:** 400 — `WEBHOOK_URL_NOT_HTTPS`, url que não usa TLS.
 **Status:** 404 — `WEBHOOK_CUSTOMER_NOT_FOUND`, `customerId` inexistente.
-**Status:** 409 — `WEBHOOK_DUPLICATE_URL`, url já cadastrada para o cliente.
 **Status:** 422 — `WEBHOOK_INVALID_STATUS_FILTER`, status fora de `OrderStatus`.
 
 ### GET /customers/:customerId/webhooks
@@ -414,13 +432,18 @@ Response:
 **Status:** 200 — endpoint atualizado.
 **Status:** 400 — `WEBHOOK_URL_NOT_HTTPS`, url que não usa TLS.
 **Status:** 404 — `WEBHOOK_NOT_FOUND`, id inexistente.
-**Status:** 409 — `WEBHOOK_DUPLICATE_URL`, url já cadastrada para o cliente.
 **Status:** 422 — `WEBHOOK_INVALID_STATUS_FILTER`, status fora de `OrderStatus`.
 
 ### DELETE /webhooks/:id
 
-Remove o endpoint. Entregas já registradas no histórico permanecem
-(`FDD-CONTRATO-04`).
+Remove o endpoint cadastrado (`FDD-CONTRATO-04`) — capacidade pedida em
+`[09:33] Bruno`: "PATCH pra editar, DELETE pra remover, GET pra listar os
+webhooks de um customer." (RF-03). **O ciclo de vida da remoção não foi
+decidido:** se a linha é apagada ou apenas desativada, o que acontece com os
+eventos ainda pendentes desse endpoint e se as entregas já registradas
+sobrevivem à remoção são pontos sem origem na reunião — ver §Não decidido na
+reunião. O contrato abaixo fecha o que a fala sustenta: a chamada remove o
+endpoint e responde 204.
 
 Headers: `Authorization: Bearer <jwt>`
 
@@ -472,12 +495,10 @@ Response:
 
 **Status:** 200 — secret rotacionada.
 **Status:** 404 — `WEBHOOK_NOT_FOUND`, id inexistente.
-**Status:** 409 — `WEBHOOK_ROTATION_IN_GRACE_PERIOD`, rotação anterior ainda dentro
-das 24 horas. **(decisão de desenho deste FDD, sem origem na reunião:**
-`[09:21] Sofia` institui o grace period e não recusa uma segunda rotação dentro
-dele; bloquear a re-rotação impede revogar uma secret comprometida por 24 horas,
-o oposto do que a fala pretendia proteger — a regra precisa de dono ou de
-remoção.**)**
+
+Uma segunda rotação dentro da janela de 24 horas **não é recusada**:
+`[09:21] Sofia` institui o grace period e não fecha nada sobre re-rotação, e
+bloqueá-la impediria revogar uma secret comprometida justamente durante a janela.
 
 ### GET /webhooks/:id/deliveries
 
@@ -549,13 +570,27 @@ Response:
 **Status:** 202 — evento recolocado na outbox.
 **Status:** 403 — `WEBHOOK_REPLAY_FORBIDDEN`, autenticado sem role `ADMIN`.
 **Status:** 404 — `WEBHOOK_DEAD_LETTER_NOT_FOUND`, id inexistente.
-**Status:** 409 — `WEBHOOK_DEAD_LETTER_ALREADY_REPLAYED`, item já reprocessado.
+
+O comportamento de um **segundo** replay do mesmo item não está especificado
+aqui: a reunião não o discutiu, e escolher entre recusar, duplicar ou ser
+idempotente é a decisão pendente registrada em §Não decidido na reunião e em
+RFC-QA-11.
 
 ### Payload do evento entregue
 
-Corpo do `POST` que o worker envia à url cadastrada (RF-09, RF-10). Sem `items`,
-para não inflar o corpo: o cliente busca o detalhe depois em `GET /orders/:id`
-(DEC-24).
+Corpo do `POST` que o worker envia à url cadastrada (RF-09, RF-10). O payload
+**omite `items` por decisão da reunião** — DEC-24, `[09:43] Diego`: "Não manda
+items pra não inflar. Se o cliente quiser detalhes, ele bate no GET /orders/:id
+depois." A omissão fica de pé; a compensação prometida por ela, não. **A rota
+citada como alternativa não é alcançável pelo cliente externo hoje:** todo o
+roteador de orders está atrás de `authenticate`
+(`src/modules/orders/order.routes.ts`:12–17) e o modelo de dados não tem
+identidade de cliente que se autentique (`prisma/schema.prisma`:40–54) — as
+mesmas DIV-07 e DIV-08 que o PRD §Problema e motivação e
+[ADR-008](adrs/ADR-008-modelo-de-autorizacao-do-modulo.md) registram. Enquanto
+essa credencial não existir, omitir `items` sem via de consulta é **lacuna
+funcional declarada**, não um payload compensado: quem precisar do detalhe do
+pedido depende hoje do mesmo operador interno descrito em PRD §Público-alvo.
 
 ```json
 {
@@ -602,7 +637,7 @@ contradição a conciliar (DIV-01, DIV-02, DIV-03).
 | `total_cents` | `Order.totalCents` | `prisma/schema.prisma`:81 |
 | `from_status` | `OrderStatusHistory.fromStatus` | `prisma/schema.prisma`:119 |
 | `to_status` | `OrderStatusHistory.toStatus` | `prisma/schema.prisma`:120 |
-| `event_id` | **O id do evento, não necessariamente o id da linha.** Na primeira inserção ele é gerado junto com a linha e coincide com `WebhookOutbox.id` (UUID, DEC-26); numa linha criada por replay ele é **copiado do evento original**, e por isso as duas linhas carregam o mesmo `event_id` | `prisma/schema.prisma` (novo model) |
+| `event_id` | `WebhookOutbox.eventId` — **campo próprio, distinto de `WebhookOutbox.id`.** Na primeira inserção ele é gerado junto com a linha; numa linha criada por replay ele é **copiado do evento original**, e por isso as duas linhas carregam o mesmo `event_id` com `id` diferente | `prisma/schema.prisma` (novo model) |
 | `event_type` | constante `order.status_changed`, sem origem no schema | — |
 | `timestamp` | `WebhookOutbox.createdAt` | `prisma/schema.prisma` (novo model) |
 
@@ -637,19 +672,15 @@ existentes** — trabalho fora do escopo desta entrega, declarado em ADR-006
 |---|---|---|---|---|---|
 | FDD-ERR-01 | WEBHOOK_URL_NOT_HTTPS | 400 | `ValidationError` † | url informada não usa TLS (RNF-14, RNF-15) | corrigir a url para https e repetir |
 | FDD-ERR-02 | WEBHOOK_INVALID_STATUS_FILTER | 422 | `UnprocessableEntityError` | lista de status assinados traz valor fora de `OrderStatus` | usar somente valores do enum publicado |
-| FDD-ERR-03 | WEBHOOK_DUPLICATE_URL | 409 | `ConflictError` | url já cadastrada e ativa para o mesmo cliente **(decisão de desenho deste FDD, sem origem na reunião)** | editar o endpoint existente em vez de criar outro |
 | FDD-ERR-04 | WEBHOOK_NOT_FOUND | 404 | `NotFoundError` † | id de endpoint inexistente ou de outro cliente | conferir o id devolvido na criação |
 | FDD-ERR-05 | WEBHOOK_CUSTOMER_NOT_FOUND | 404 | `NotFoundError` † | `customerId` do path não existe | conferir o identificador do cliente |
-| FDD-ERR-06 | WEBHOOK_ROTATION_IN_GRACE_PERIOD | 409 | `ConflictError` | nova rotação pedida com a janela de 24 horas ainda aberta **(decisão de desenho deste FDD, sem origem na reunião)** | aguardar o fim da janela antes de rotacionar de novo |
 | FDD-ERR-07 | WEBHOOK_REPLAY_FORBIDDEN | 403 | `ForbiddenError` † | replay pedido por usuário autenticado sem role `ADMIN` (DEC-19) | pedir a operação a quem tem o papel |
 | FDD-ERR-08 | WEBHOOK_DEAD_LETTER_NOT_FOUND | 404 | `NotFoundError` † | id de item da dead-letter queue inexistente | conferir o id na origem em que ele foi obtido — **nenhum dos sete contratos desta entrega expõe listagem da dead-letter queue**, e essa lacuna não foi decidida na reunião |
-| FDD-ERR-09 | WEBHOOK_DEAD_LETTER_ALREADY_REPLAYED | 409 | `ConflictError` | item já reprocessado por um replay anterior **(decisão de desenho deste FDD, sem origem na reunião)** | consultar a outbox pelo evento reenviado |
 | FDD-ERR-10 | WEBHOOK_PAYLOAD_TOO_LARGE | 422 | `UnprocessableEntityError` | corpo renderizado passa de 64KB (RNF-17) | nenhuma; é falha terminal, o evento vai para a fila de morte |
 | FDD-ERR-11 | WEBHOOK_DELIVERY_TIMEOUT | 422 | `UnprocessableEntityError` | endpoint do cliente não respondeu em 10 segundos (DEC-23) | nenhuma na hora; o envio é retentado |
-| FDD-ERR-12 | WEBHOOK_DELIVERY_FAILED | 422 | `UnprocessableEntityError` | endpoint respondeu fora da faixa 2xx **(decisão de desenho deste FDD, sem origem na reunião)** | nenhuma na hora; o envio é retentado |
-| FDD-ERR-13 | WEBHOOK_SIGNATURE_UNAVAILABLE | 422 | `UnprocessableEntityError` | endpoint sem secret utilizável no momento do envio **(decisão de desenho deste FDD, sem origem na reunião)** | rotacionar a secret pelo endpoint de rotação |
+| FDD-ERR-12 | WEBHOOK_DELIVERY_FAILED | 422 | `UnprocessableEntityError` | endpoint respondeu fora da faixa 2xx **(decisão de desenho deste FDD, sem origem na reunião — a ata fecha só o timeout; ratificação pedida em RFC-QA-12)** | nenhuma na hora; o envio é retentado |
 
-As quatro últimas linhas nascem no worker, fora de um ciclo request/response: o
+As três últimas linhas nascem no worker, fora de um ciclo request/response: o
 `statusCode` que a classe carrega não trafega para cliente nenhum, mas existe
 porque a classe estende a hierarquia do projeto e o código é o que fica gravado em
 `webhook_deliveries` e em `webhook_dead_letter`. Elas são lidas pelo cliente por
@@ -660,20 +691,21 @@ porque a classe estende a hierarquia do projeto e o código é o que fica gravad
 | Mecanismo | Valor | Origem |
 |---|---|---|
 | Timeout do HTTP call do worker | 10 segundos | DEC-23, RNF-22 |
-| Tentativas antes da fila de morte | 5 chamadas | DEC-05, `[09:17] Larissa` |
+| Tentativas antes da fila de morte | até 5 no total (1 inicial + 4 retentativas) | DEC-05, `[09:17] Larissa` |
 | Progressão do backoff | 1m · 5m · 30m · 2h (4 intervalos) | DEC-05, `[09:17] Larissa` |
 | Janela total coberta | 2h36min | derivada da progressão; ver RFC-QA-05 |
 | Limite de tamanho do corpo | 64KB | RNF-17 |
 | Grace period da secret anterior | 24 horas | DEC-09, RNF-13 |
 | Intervalo de polling | 2 segundos | DEC-02, RNF-02 |
-| Latência mínima imposta pelo intervalo de polling | 2 segundos | RNF-03 |
+| Espera de agendamento acrescentada pelo polling | até 2 segundos | RNF-03 |
 | Histórico exposto | últimos 100 envios | RF-07, RNF-19 |
 
 **Timeout.** Cliente que não responde em 10 segundos é tratado como falha e o
 evento entra na política de retentativa. O valor não é arredondado nem derivado: é
 o número dito na reunião.
 
-**Retentativa e fila de morte.** Cinco tentativas, na progressão fixa acima, e
+**Retentativa e fila de morte.** Até 5 tentativas de entrega no total (1 inicial
++ 4 retentativas), na progressão fixa acima, e
 depois `webhook_dead_letter`, com payload, motivo da falha e timestamp (DEC-06). A
 progressão é literal — nenhum termo foi acrescentado para "fechar" a curva.
 
@@ -851,8 +883,8 @@ precisa considerar isso.
 - `GET /webhooks/:id/deliveries` devolve no máximo 100 registros, cada um com
   resultado, payload, response e tempo de resposta.
 - Replay sem role `ADMIN` responde HTTP 403; com role `ADMIN`, cria linha nova em
-  `webhook_outbox` com `attempts = 0` e grava o identificador de quem executou.
-- Um segundo replay do mesmo item da dead-letter queue responde HTTP 409.
+  `webhook_outbox` com `attempts = 0`, com o `eventId` do evento original e `id`
+  novo, e grava o identificador de quem executou.
 - O mesmo evento entregue duas vezes carrega o mesmo `X-Event-Id`.
 - Nenhuma linha de log contém o valor de uma secret nem o conteúdo de
   `X-Signature`.
@@ -927,12 +959,23 @@ existente, não código novo:**
   Enquanto esse delta não existir, o campo chega sempre indefinido e o fio de
   correlação descrito em §Observabilidade fica cortado.
 
-**Campos da linha de `webhook_outbox`:** `id` (UUID, DEC-26) · `webhookEndpointId`
+**Campos da linha de `webhook_outbox`:** `id` (UUID, DEC-26) · `eventId` (UUID no
+mesmo tipo do id, `String @db.Char(36)`, o padrão dos ids do projeto —
+`prisma/schema.prisma`:75) · `webhookEndpointId`
 (FK) · `orderId` (FK) · `eventType` (`order.status_changed`) · `payload` (snapshot
 renderizado, DEC-27) · `status` (`PENDING` · `PROCESSING` · `DELIVERED` · `FAILED`,
 os quatro estados que a reunião nomeou em RNF-04) · `attempts` · `nextAttemptAt` ·
 `lastErrorCode` · `requestId` · `createdAt` · `updatedAt`. Índices: status,
 `createdAt` (RNF-04), `nextAttemptAt`, `orderId` e `webhookEndpointId`.
+
+**`id` e `eventId` são dois identificadores distintos, e é essa separação que
+torna o replay escrevível.** `id` identifica a **linha**: é gerado a cada
+inserção e nunca se repete. `eventId` identifica o **evento**: na primeira
+inserção ele é gerado junto com a linha, e na linha criada por replay ele é
+**copiado do evento original**, de modo que as duas linhas carreguem o mesmo
+valor. É `eventId` — não `id` — que vira o campo `event_id` do payload e o header
+`X-Event-Id` que DEC-10 contratou como chave de dedup (ADR-005). Sem esse
+segundo campo a preservação descrita em §DLQ e replay não teria onde acontecer.
 
 **Comportamento em caso de erro:** `publishWebhookEvent` não engole exceção. Uma
 falha de escrita propaga para o callback de `$transaction` e derruba a transação
@@ -944,9 +987,9 @@ de um efeito colateral opcional.
 |---|---|
 | `src/modules/orders/order.service.ts` | Ganha uma chamada a `publishWebhookEvent` dentro do callback transacional de `changeStatus` e um import do módulo de webhooks. Construtor (linhas 27–30) intocado: nenhum repository novo é injetado. |
 | `src/modules/orders/order.status.ts` | Ganha o predicado `shouldEmitWebhookEvent(from, to)`, na forma `(from, to) => boolean`, ao lado de `shouldDebitStock` (linha 29). A política de transição segue sendo dado neste arquivo, não `if` no service. |
-| `src/shared/errors/http-errors.ts` | Ganha 13 classes novas, uma por linha de §Matriz de erros. Oito delas estendem `ConflictError` (linha 33) ou `UnprocessableEntityError` (linha 39), que aceitam código próprio por parâmetro — precedente literal `InsufficientStockError` (linha 55). **As cinco marcadas † na matriz não fecham por herança:** `ValidationError` (linhas 9–13), `ForbiddenError` (21–25) e `NotFoundError` (27–31) fixam `'VALIDATION_ERROR'`, `'FORBIDDEN'` e `'NOT_FOUND'` no próprio `super(...)`, sem parâmetro de código, e `AppError.errorCode` é `readonly` (`src/shared/errors/app-error.ts`:5), o que impede sobrescrever depois. Emitir `WEBHOOK_` nessas cinco exige **alterar as três classes base** (acrescentar parâmetro de código, como `ConflictError` já tem) — mudança em arquivo existente, fora do escopo desta entrega e registrada em ADR-006. |
+| `src/shared/errors/http-errors.ts` | Ganha 9 classes novas, uma por linha de §Matriz de erros. Quatro delas estendem `ConflictError` (linha 33) ou `UnprocessableEntityError` (linha 39), que aceitam código próprio por parâmetro — precedente literal `InsufficientStockError` (linha 55). **As cinco marcadas † na matriz não fecham por herança:** `ValidationError` (linhas 9–13), `ForbiddenError` (21–25) e `NotFoundError` (27–31) fixam `'VALIDATION_ERROR'`, `'FORBIDDEN'` e `'NOT_FOUND'` no próprio `super(...)`, sem parâmetro de código, e `AppError.errorCode` é `readonly` (`src/shared/errors/app-error.ts`:5), o que impede sobrescrever depois. Emitir `WEBHOOK_` nessas cinco exige **alterar as três classes base** (acrescentar parâmetro de código, como `ConflictError` já tem) — mudança em arquivo existente, fora do escopo desta entrega e registrada em ADR-006. |
 | `src/middlewares/validate.middleware.ts` | **Delta não previsto, declarado aqui.** Todo `ZodError` é convertido em `ValidationError('Validation failed', details)` (linhas 25–32), de código fixo. Logo a validação de schema do módulo — incluindo a recusa de url sem TLS, que `[09:23] Sofia` descreve como "só uma validação no schema Zod" — responde com o código genérico, não com `WEBHOOK_URL_NOT_HTTPS`, enquanto este arquivo não for alterado. |
-| `src/shared/errors/index.ts` | Ganha as 13 classes novas na lista de reexport (hoje linhas 3–13). É por este barril que os módulos importam erro; nenhum arquivo de `src/modules/` importa `http-errors` direto. |
+| `src/shared/errors/index.ts` | Ganha as 9 classes novas na lista de reexport (hoje linhas 3–13). É por este barril que os módulos importam erro; nenhum arquivo de `src/modules/` importa `http-errors` direto. |
 | `src/middlewares/error.middleware.ts` | **Nada muda.** As classes novas estendem `AppError` por herança e caem no primeiro ramo do handler (linha 15), que já monta `{ error: { code, message, details? } }`. Registrar isso é parte do desenho: a ausência de mudança aqui é o que prova o reuso (DEC-15). |
 | `src/middlewares/auth.middleware.ts` | **Nada muda.** As rotas novas compõem `authenticate` (linha 27) e, no replay, `requireRole('ADMIN')` (linha 49), no formato já usado em `src/modules/users/user.routes.ts`:11–17. O universo de papéis segue com dois valores. |
 | `src/routes/index.ts` | O tipo `Controllers` (linha 13) ganha o campo de webhooks e `buildApiRouter` (linha 21) ganha as linhas `router.use('/webhooks', ...)` e `router.use('/admin/webhooks', ...)`. |
