@@ -686,13 +686,18 @@ porque a classe estende a hierarquia do projeto e o código é o que fica gravad
 `webhook_deliveries` e em `webhook_dead_letter`. Elas são lidas pelo cliente por
 `GET /webhooks/:id/deliveries`, não por resposta direta.
 
-**A sequência salta o FDD-ERR-06.** O código `WEBHOOK_ROTATION_IN_GRACE_PERIOD`
-recusava uma segunda rotação dentro da janela de 24 horas e foi **retirado**: a
-fala que ele citava como origem institui o grace period e não fecha nada sobre
-re-rotação, e o bloqueio impediria revogar uma secret comprometida justamente
-durante as 24 horas em que ela ainda assina. Os demais IDs **não** foram
+**A sequência salta o FDD-ERR-03, o FDD-ERR-06, o FDD-ERR-09 e o FDD-ERR-13.**
+Os quatro códigos foram **retirados** por um mesmo motivo: cada um afirmava uma
+regra que nem a reunião nem o código sustentam. FDD-ERR-03,
+`WEBHOOK_DUPLICATE_URL`, inventava uma constraint de unicidade de url;
+FDD-ERR-06, `WEBHOOK_ROTATION_IN_GRACE_PERIOD`, recusava uma segunda rotação
+dentro da janela de 24 horas — e o bloqueio ainda impediria revogar uma secret
+comprometida justamente durante as 24 horas em que ela ainda assina; FDD-ERR-09,
+`WEBHOOK_DEAD_LETTER_ALREADY_REPLAYED`, tornava o replay idempotente por conta
+própria; FDD-ERR-13, `WEBHOOK_SIGNATURE_UNAVAILABLE`, previa um cenário de borda
+da rotação que ninguém discutiu. Os demais IDs **não** foram
 renumerados, para não quebrar as referências cruzadas dos outros documentos; o
-registro da retirada está em `docs/TRACKER.md` §Códigos retirados.
+motivo de cada retirada está em `docs/TRACKER.md` §Códigos retirados.
 
 ## Estratégias de resiliência
 

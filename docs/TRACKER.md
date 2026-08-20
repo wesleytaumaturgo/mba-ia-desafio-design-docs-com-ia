@@ -19,9 +19,12 @@ encontre em `docs/PRD.md`, `docs/RFC.md`, `docs/FDD.md`, `docs/adrs/` ou
 `README.md` tem aqui uma linha própria, com o que o identificador significa e
 de onde ele veio — sem depender dos artefatos de processo em `.planning/`, que
 não fazem parte da entrega. Identificador citado nos documentos e ausente
-daqui é falha do tracker, não licença para o leitor adivinhar: o check TRK-2
-de `scripts/verify.sh` mede exatamente essa cobertura, sobre o mesmo universo
-amplo que um leitor externo enxerga.
+daqui é falha do tracker, não licença para o leitor adivinhar — e essa cobertura
+foi medida por um check dedicado do verificador executável, sobre o mesmo
+universo amplo que um leitor externo enxerga. O verificador também não faz parte
+da árvore entregue — é ferramenta de processo, não documento —, mas está
+preservado no histórico e é reproduzível a partir do commit `07f8496`, como o
+`README.md` §Como navegar a entrega descreve.
 
 ## Referência cruzada
 
@@ -40,7 +43,7 @@ amplo que um leitor externo enxerga.
 | PRD-FR-11 | docs/PRD.md | Requisito Funcional | Header identifica o endpoint de origem da entrega | TRANSCRICAO | `[09:44] Sofia` |
 | PRD-RNF-01 | docs/PRD.md | Requisito Não Funcional | Entrega em menos de 10 segundos | TRANSCRICAO | `[09:02] Marcos` |
 | PRD-RNF-02 | docs/PRD.md | Requisito Não Funcional | Intervalo de polling de eventos pendentes: 2s | TRANSCRICAO | `[09:09] Diego` |
-| PRD-RNF-03 | docs/PRD.md | Requisito Não Funcional | Latência mínima imposta pelo intervalo de polling: 2s | TRANSCRICAO | `[09:10] Larissa` |
+| PRD-RNF-03 | docs/PRD.md | Requisito Não Funcional | O polling acrescenta até 2s de espera de agendamento antes da primeira tentativa — 2s é o teto desse componente, não um piso da entrega (leitura adotada; a ata é ambígua, ver RNF-03) | TRANSCRICAO | `[09:10] Larissa` |
 | PRD-RNF-04 | docs/PRD.md | Requisito Não Funcional | Fila indexada por status e created_at | TRANSCRICAO | `[09:08] Diego` |
 | PRD-RNF-05 | docs/PRD.md | Requisito Não Funcional | Leitura processa só pendentes, em lotes pequenos | TRANSCRICAO | `[09:08] Diego` |
 | PRD-RNF-06 | docs/PRD.md | Requisito Não Funcional | Retentativa até 5 vezes antes da DLQ | TRANSCRICAO | `[09:17] Larissa` |
@@ -134,7 +137,7 @@ amplo que um leitor externo enxerga.
 | RF-13 | docs/PRD.md | Requisito Funcional | Header X-Webhook-Id com o id do endpoint cadastrado, para cliente com vários webhooks; citado também em `docs/FDD.md` | TRANSCRICAO | `[09:44] Sofia` |
 | RNF-01 | docs/PRD.md | Requisito Não Funcional | Definição de "tempo real" pelos clientes: abaixo de 10 segundos — origem de PRD-RNF-01; citado também em `docs/FDD.md` | TRANSCRICAO | `[09:02] Marcos` |
 | RNF-02 | docs/PRD.md | Requisito Não Funcional | Intervalo de polling do worker: 2 segundos; citado também em `docs/FDD.md` | TRANSCRICAO | `[09:09] Diego` |
-| RNF-03 | docs/PRD.md | Requisito Não Funcional | Latência de entrega aceita: 2 segundos no pior caso; citado também em `docs/FDD.md` | TRANSCRICAO | `[09:10] Larissa` |
+| RNF-03 | docs/PRD.md | Requisito Não Funcional | Fala literal da ata: "A latência mínima vai ser 2 segundos no pior caso. Aceitamos." — formulação ambígua ("mínima" e "pior caso" não são o mesmo número); a leitura vigente do pacote é a de teto, em PRD-RNF-03; citado também em `docs/FDD.md` | TRANSCRICAO | `[09:10] Larissa` |
 | RNF-04 | docs/PRD.md | Requisito Não Funcional | Índices exigidos na outbox: campo de status e created_at; citado também em `docs/FDD.md` | TRANSCRICAO | `[09:08] Diego` |
 | RNF-05 | docs/PRD.md | Requisito Não Funcional | Worker lê apenas pendentes, em batch pequeno; citado também em `docs/FDD.md` | TRANSCRICAO | `[09:08] Diego` |
 | RNF-06 | docs/PRD.md | Requisito Não Funcional | Arquivamento de linhas entregues após ~30 dias — declarado fora do escopo desta feature, ver REC-11 | TRANSCRICAO | `[09:08] Diego` |
@@ -174,7 +177,7 @@ amplo que um leitor externo enxerga.
 | DIV-01 | docs/RFC.md | Divergência | A fala diz "decrementa stock_quantity dos produtos do pedido"; o campo se chama `stockQuantity` e é também o nome literal da coluna no MySQL — `stock_quantity` não existe; citada também em `docs/FDD.md` | CODIGO | `prisma/schema.prisma:62` |
 | DIV-02 | docs/RFC.md | Divergência | A fala nomeia `order_id`, `order_number`, `from_status`, `to_status`, `customer_id` como campos do payload; as colunas são `id`, `orderNumber`, `customerId`, `fromStatus`, `toStatus` — nenhuma das cinco grafias snake_case existe no banco; citada também em `docs/FDD.md` | CODIGO | `prisma/schema.prisma:75` |
 | DIV-03 | docs/RFC.md | Divergência | A fala cita "os campos básicos da order tipo total_cents"; o campo é `totalCents`, `Int`, e existem ainda `subtotalCents` e `discountCents`, não citados; citada também em `docs/FDD.md` | CODIGO | `prisma/schema.prisma:79` |
-| DIV-04 | docs/adrs/ADR-007-insercao-na-outbox-dentro-da-transacao.md | Divergência | A fala diz que a transação "faz update na order, insere no history e atualiza estoque"; a atualização de estoque é condicional à transição — em 5 das 8 transições nenhum produto é tocado | CODIGO | `src/modules/orders/order.service.ts:151` |
+| DIV-04 | docs/adrs/ADR-007-insercao-na-outbox-dentro-da-transacao.md | Divergência | A fala diz que a transação "faz update na order, insere no history e atualiza estoque"; a atualização de estoque é condicional à transição — em 4 das 7 transições nenhum produto é tocado | CODIGO | `src/modules/orders/order.service.ts:151` |
 | DIV-05 | docs/RFC.md | Divergência | A fala diz "trigger no banco a gente até tem"; não há trigger algum no repositório — a migration tem só `CREATE TABLE`, `CREATE INDEX` e `ADD FOREIGN KEY`; citada também em ADR-001 e ADR-002 | CODIGO | `prisma/migrations/20260519182739_init/migration.sql` |
 | DIV-06 | docs/adrs/ADR-002-worker-processo-separado-polling.md | Divergência | A fala diz "o pool de conexão do Prisma já tá lá"; não há configuração de pool em lugar nenhum — o pool existe por default do Prisma, não por configuração do projeto; citada também em `docs/FDD.md` | CODIGO | `src/config/database.ts:4` |
 | DIV-07 | docs/RFC.md | Divergência | A fala supõe "usuários que representam o cliente"; `UserRole` tem só `ADMIN` e `OPERATOR`, e `Customer` é model sem senha, sem papel e sem relação com `User`; citada também em `docs/PRD.md`, `docs/FDD.md` e ADR-008 | CODIGO | `prisma/schema.prisma:11` |
@@ -182,7 +185,7 @@ amplo que um leitor externo enxerga.
 | DIV-09 | docs/adrs/ADR-006-reuso-dos-padroes-existentes.md | Divergência | A fala diz que todo módulo tem controller, service, repository, routes e schemas; o módulo `auth` não tem repository e `orders` tem um sexto arquivo, `src/modules/orders/order.status.ts`; citada também em `docs/FDD.md` | CODIGO | `src/modules/auth/auth.service.ts:6` |
 | DIV-10 | docs/RFC.md | Divergência | A fala diz "tudo é uuid"; vale para 6 dos 7 models — `OrderNumberSequence.id` é `Int @id @default(1)`; citada também em `docs/FDD.md` | CODIGO | `prisma/schema.prisma:133` |
 | DIV-11 | docs/RFC.md | Divergência | A fala trata `changeStatus` como ponto único de mudança de status; `create` também grava a transição inicial num caminho separado, e um gancho só em `changeStatus` não vê a criação do pedido; citada também em `docs/FDD.md` e ADR-007 | CODIGO | `src/modules/orders/order.service.ts:106` |
-| DIV-12 | docs/RFC.md | Divergência | A reunião cita só `PAID`, `PROCESSING`, `SHIPPED` e `DELIVERED`; o enum tem seis valores — `PENDING` e `CANCELLED` participam de 4 das 8 transições e não foram citados; citada também em `docs/FDD.md` e ADR-007 | CODIGO | `prisma/schema.prisma:16` |
+| DIV-12 | docs/RFC.md | Divergência | A reunião cita só `PAID`, `PROCESSING`, `SHIPPED` e `DELIVERED`; o enum tem seis valores — `PENDING` e `CANCELLED` participam de 4 das 7 transições e não foram citados; citada também em `docs/FDD.md` e ADR-007 | CODIGO | `prisma/schema.prisma:16` |
 | DIV-13 | docs/adrs/ADR-006-reuso-dos-padroes-existentes.md | Divergência | A fala diz que o logger Pino "já tá no projeto inteiro"; o singleton é importado em exatamente 3 arquivos — `src/server.ts`, `src/middlewares/error.middleware.ts` e `src/middlewares/request-logger.middleware.ts` — e nenhum service, controller ou repository loga; citada também em ADR-008 | CODIGO | `src/shared/logger/index.ts:32` |
 | DIV-14 | docs/adrs/ADR-001-outbox-no-mysql.md | Divergência | A fala diz "outbox no MySQL existente resolve"; o MySQL existe, mas não há precedente de transacionalidade de outbox — nenhum repository aceita `tx` e a única escrita transacional multi-tabela vive dentro do `OrderService` | CODIGO | `prisma/schema.prisma:6` |
 
@@ -198,12 +201,9 @@ origem de um item específico.
 
 | ID | Documento | Por que não tem origem | Ação sugerida |
 |---|---|---|---|
-| FDD-ERR-03 | docs/FDD.md | `WEBHOOK_DUPLICATE_URL` (url já cadastrada e ativa para o mesmo cliente) não é citado em nenhuma fala da reunião nem tem precedente de constraint de unicidade de URL no código lido; só a classe genérica `ConflictError` se aplicaria, e ela não distingue esta regra de nenhuma outra | Confirmar com quem escreveu o FDD se a regra foi decidida fora da reunião registrada, ou documentá-la como decisão nova do FDD, não como algo herdado |
 | PRD-RNF-22 | docs/PRD.md | A proibição de devolver a secret fora da criação e da rotação não tem fala nem código. `[09:31] Marcos` diz que a secret "é gerada pela gente e devolvida na criação" — cobre a devolução, não a proibição nas demais consultas. Não há precedente no código: a busca por `hmac\|crypto\|createHmac\|signature` em `src/ prisma/ tests/ package.json` é vazia. O item existia no PRD como critério de aceite sem ID; ganhou ID aqui para ficar visível, não para ganhar origem | Registrar como decisão nova do PRD/FDD, com dono e data. A regra em si é sensata e não deve ser removida por falta de fala — o que falta é o dono |
 | FDD-ERR-08 | docs/FDD.md | `WEBHOOK_DEAD_LETTER_NOT_FOUND` (id de item de dead-letter inexistente) estava na tabela principal apontando para `src/shared/errors/http-errors.ts:27`, que é a classe genérica `NotFoundError` — a mesma origem genérica que esta seção declara insuficiente. A dead-letter queue é estrutura nova, sem precedente de código próprio, e nenhuma fala trata do id inexistente: `[09:18] Diego` cria o endpoint de replay, não o erro. `[09:28] Bruno` nomeia `WEBHOOK_NOT_FOUND`, não este | Registrar como decisão nova do FDD, com dono e data, ou derivá-la explicitamente do padrão de 404 do projeto em um DEC próprio |
-| FDD-ERR-09 | docs/FDD.md | `WEBHOOK_DEAD_LETTER_ALREADY_REPLAYED` (proteção contra replay duplicado) não consta da reunião — RNF-18 discute deduplicação do lado do cliente, não idempotência do endpoint de replay — nem há precedente de código, já que a dead-letter queue é estrutura nova | Mesma ação: registrar como decisão nova do FDD, com dono e data, em vez de tracker apontando origem que não existe |
 | FDD-ERR-12 | docs/FDD.md | `WEBHOOK_DELIVERY_FAILED` (resposta fora da faixa 2xx) não é citado explicitamente; DEC-05/RNF-07 cobrem o número de tentativas e o backoff, não o critério que classifica uma resposta HTTP como falha | Se o critério "fora de 2xx" foi decisão implícita, torná-la explícita em um DEC ou registrar como decisão nova do FDD |
-| FDD-ERR-13 | docs/FDD.md | `WEBHOOK_SIGNATURE_UNAVAILABLE` (endpoint sem secret utilizável no momento do envio) não aparece em nenhuma fala sobre secret/rotação (DEC-07/08/09, RNF-13) nem em código — HMAC e secret são funcionalidade nova, `grep -rniE 'hmac|crypto|createHmac|signature'` em `src/ prisma/ tests/ package.json` retorna vazio (`.planning/02-codigo.md` §4) | Tratar como decisão nova do FDD (cenário de borda da rotação) e registrar quem a decidiu, já que não há fala nem código que a sustente |
 | RFC-QA-06 | docs/RFC.md | Ausência de decisão na reunião; registrada como questão em aberto. Recuperação de linha em `PROCESSING` após queda do worker: `grep -inE 'lease\|reinici\|retoma\|em processamento\|timeout de processamento'` em `TRANSCRICAO.md` devolve só `[09:11] Diego` ("se a API reinicia, perde o worker"), que motiva separar o processo e não trata da linha em voo | Decidir lease, timeout de processamento ou reset no startup antes de implementar — a garantia at-least-once de DEC-10 depende disso |
 | RFC-QA-07 | docs/RFC.md | Ausência de decisão na reunião; registrada como questão em aberto. O alcance real da perda de ordenação foi descoberto na análise do algoritmo, não dito por ninguém: `grep -inE 'backoff.{0,40}ordem\|ordem.{0,40}backoff\|ordem.{0,30}retentativa'` é vazio. DEC-04 (`[09:13] Larissa`) existe, mas declara alcance menor | Decidir se a ordem por `order_id` é contrato ou best-effort; ampliação do alcance já declarada em ADR-002 |
 | RFC-QA-08 | docs/RFC.md | Ausência de decisão na reunião; registrada como questão em aberto. Armazenamento da secret em repouso e key management: `grep -inE 'secret.{0,30}(cifrad\|criptograf\|hash\|plain\|texto claro\|em claro)\|proteg.{0,20}secret'` é vazio. `[09:21] Bruno` põe a secret na tabela e não trata de protegê-la | Decisão de segurança, com dono e data, antes da migration que cria a coluna |
@@ -215,15 +215,21 @@ origem de um item específico.
 
 ## Códigos retirados
 
-Item que existiu no pacote e foi **removido**, com o motivo. A seção existe para
-que o leitor que encontre um salto na numeração saiba que ele é intencional.
-Nenhum ID foi renumerado depois da retirada: renumerar quebraria as referências
-cruzadas dos quatro documentos por uma questão cosmética, e o salto na sequência
-é o preço aceito.
+Itens que existiram no pacote e foram **removidos**, com o motivo de cada um. A
+seção existe para que o leitor que encontre um salto na numeração saiba que ele
+é intencional. Nenhum ID foi renumerado depois da retirada: renumerar quebraria
+as referências cruzadas dos quatro documentos por uma questão cosmética, e o
+salto na sequência é o preço aceito. Os quatro saíram na mesma passagem, e por
+um mesmo critério — a regra que cada um codificava não tem fala na reunião nem
+precedente no código, e uma regra inventada é pior do que uma lacuna declarada.
+O salto correspondente está anunciado em `docs/FDD.md` §Matriz de erros.
 
 | ID retirado | Documento | Código | Por que saiu |
 |---|---|---|---|
-| FDD-ERR-06 | docs/FDD.md | `WEBHOOK_ROTATION_IN_GRACE_PERIOD` | **Origem falsa e efeito adverso.** A linha declarava `[09:21] Sofia` como origem, mas a fala institui o grace period — "Quando ele rotaciona, a antiga fica válida por 24 horas em paralelo" — e **não** diz nem sugere que uma nova rotação seja recusada enquanto a janela está aberta. Também não há lastro em código: `grep -rniE 'hmac\|crypto\|createHmac\|signature'` em `src/ prisma/ tests/ package.json` é vazio. Pior que a origem: a regra contradizia o propósito da decisão que dizia implementar — bloquear a re-rotação impede revogar uma secret comprometida durante as 24 horas em que ela ainda assina. Retirada a linha da matriz de erros e o ramo de erro do contrato de `POST /webhooks/:id/secret/rotate`; o comportamento vigente está declarado no próprio contrato, em `docs/FDD.md` §Contratos públicos |
+| FDD-ERR-03 | docs/FDD.md | `WEBHOOK_DUPLICATE_URL` | **Regra sem origem.** Recusava com 409 o cadastro de uma url já ativa para o mesmo cliente. Nenhuma fala da reunião trata de unicidade de url, e o código não tem precedente de constraint que a sustente: só a classe genérica `ConflictError` se aplicaria, e ela não distingue esta regra de nenhuma outra. Retiradas a linha da matriz e os dois ramos `409` dos contratos de `POST /customers/:customerId/webhooks` e `PATCH /webhooks/:id` |
+| FDD-ERR-06 | docs/FDD.md | `WEBHOOK_ROTATION_IN_GRACE_PERIOD` | **Origem falsa e efeito adverso.** A linha declarava `[09:21] Sofia` como origem, mas a fala institui o grace period — "Quando ele rotaciona, a antiga fica válida por 24 horas em paralelo" — e **não** diz nem sugere que uma nova rotação seja recusada enquanto a janela está aberta. Também não há lastro em código: `grep -rniE 'hmac\|crypto\|createHmac\|signature'` em `src/ prisma/ tests/ package.json` é vazio. Pior que a origem: a regra contradizia o propósito da decisão que dizia implementar — bloquear a re-rotação impede revogar uma secret comprometida durante as 24 horas em que ela ainda assina. Retiradas a linha da matriz e o ramo de erro do contrato de `POST /webhooks/:id/secret/rotate`; o comportamento vigente está declarado no próprio contrato, em `docs/FDD.md` §Contratos públicos |
+| FDD-ERR-09 | docs/FDD.md | `WEBHOOK_DEAD_LETTER_ALREADY_REPLAYED` | **Regra sem origem.** Recusava com 409 um segundo replay do mesmo item da dead-letter queue. A reunião não discutiu idempotência do endpoint de replay — RNF-18 trata de deduplicação do lado do cliente, que é outra coisa — e a DLQ é estrutura nova, sem precedente de código. Escolher entre recusar, duplicar ou ser idempotente é decisão pendente, e está declarada como tal em `docs/FDD.md` §Não decidido na reunião e em RFC-QA-11. Retiradas a linha da matriz e o ramo `409` do contrato de replay |
+| FDD-ERR-13 | docs/FDD.md | `WEBHOOK_SIGNATURE_UNAVAILABLE` | **Regra sem origem.** Previa o envio a um endpoint sem secret utilizável no momento da entrega. Nenhuma fala sobre secret ou rotação (DEC-07, DEC-08, DEC-09, RNF-13) cobre esse cenário de borda, e não há código: HMAC e secret são funcionalidade nova — `grep -rniE 'hmac\|crypto\|createHmac\|signature'` em `src/ prisma/ tests/ package.json` retorna vazio. Retirada a linha da matriz; nenhum contrato a expunha |
 
 ## Validação de Localização (TRANSCRICAO)
 

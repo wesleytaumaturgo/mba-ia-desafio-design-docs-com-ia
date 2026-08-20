@@ -24,7 +24,7 @@ formal de três clientes B2B nomeados — Atlas Comercial, MaxDistribuição e N
 Cargo (RNF-25, `[09:00] Marcos`) — e carrega peso comercial explícito: "se a
 gente não entregar isso até fim do trimestre, eles podem migrar pro nosso
 concorrente" (RNF-24, `[09:00] Marcos`). O prazo combinado com a área comercial
-é o fim de novembro (PRD-RNF-21, `[09:45] Marcos`).
+é o fim de novembro (RNF-23, `[09:45] Marcos`).
 
 Hoje esses clientes só descobrem que um pedido mudou de status voltando a
 perguntar — a premissa declarada na reunião é que eles "ficam batendo no GET

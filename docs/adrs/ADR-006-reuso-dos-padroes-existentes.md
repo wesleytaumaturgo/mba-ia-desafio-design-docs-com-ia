@@ -168,7 +168,7 @@ literalmente o formato de `INSUFFICIENT_STOCK` e `INVALID_STATUS_TRANSITION`.
   que fecha a saída de sobrescrever após a construção. Some-se
   `src/middlewares/validate.middleware.ts`:25–32, que converte **todo**
   `ZodError` em `ValidationError` de código fixo — o caminho por onde passa a
-  validação de url do endpoint. Consequência: cinco dos treze códigos da matriz
+  validação de url do endpoint. Consequência: cinco dos nove códigos da matriz
   do FDD (as linhas marcadas † em §Matriz de erros) só emitem `WEBHOOK_` depois
   de um delta nas três classes base. Esta entrega **não** faz esse delta — ela o
   declara, aqui e na §Integração do FDD, como trabalho pendente e visível, em vez

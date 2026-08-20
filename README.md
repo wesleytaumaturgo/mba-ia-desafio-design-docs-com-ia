@@ -183,7 +183,7 @@ durante a produção — não ajuste de estilo. São os seis commits com prefixo
    (`src/shared/errors/http-errors.ts:9-31`) não recebem código por parâmetro,
    e `AppError.errorCode` é `readonly`
    (`src/shared/errors/app-error.ts:5`) — então o prefixo `WEBHOOK_` decidido
-   na reunião não é alcançável só por herança para cinco das treze classes de
+   na reunião não é alcançável só por herança para cinco das nove classes de
    erro do módulo, como o FDD original afirmava. Documentado como delta
    declarado sobre código existente, sem alterar nenhum arquivo de código.
 

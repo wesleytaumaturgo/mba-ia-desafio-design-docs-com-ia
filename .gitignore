@@ -10,10 +10,10 @@ coverage/
 .vscode/
 *.tsbuildinfo
 
-# ── Override do ~/.gitignore_global (linha 12: .planning/) ──
-# Artefatos de processo desta entrega precisam ser versionados.
-!.planning/
-
-# Artefatos de processo — fora da entrega, preservados no histórico
+# ── Artefatos de processo ──
+# A entrega é o pacote de documentos; o rastro de produção (notas de bloco e o
+# verificador executável dos critérios de aceite) não é documento entregue.
+# Ficou versionado durante a produção e saiu do índice no fechamento, mas segue
+# preservado no histórico — reproduzível a partir do commit 07f8496.
 .planning/
 scripts/
