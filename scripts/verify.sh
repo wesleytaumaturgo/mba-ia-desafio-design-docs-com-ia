@@ -17,7 +17,7 @@
 #
 # v7 (2026-08-19) acrescenta os cinco checks do tracker:
 #   TRK-1 header literal da tabela principal + toda linha de dados com 6
-#   campos · TRK-2 cobertura ≥80% do universo de IDs C-2 extraído dos
+#   campos · TRK-2 cobertura ≥80% do universo AMPLO de IDs extraído dos
 #   DOCUMENTOS (nunca do tracker) · TRK-3 ≥70% das linhas com Fonte=TRANSCRICAO
 #   e toda Localização conferível por grep -F em TRANSCRICAO.md · TRK-4 ≥5
 #   linhas com Fonte=CODIGO e caminho real em git ls-files · GER-2 nenhum
@@ -1121,7 +1121,27 @@ fi
 [ -r "$TRACKER_FILE" ] || erro "TRK-1 não consegue ler $TRACKER_FILE"
 
 TRK_HEADER='| ID | Documento | Tipo | Conteúdo (resumo) | Fonte | Localização |'
-TRK_ID_RE='(PRD-FR|PRD-RNF|RFC-ALT|RFC-QA|FDD-CONTRATO|FDD-ERR)-[0-9]{2}|ADR-[0-9]{3}'
+
+# Padrão AMPLO de identificador, corrigido na auditoria externa
+# (.planning/13-auditoria-externa.md §3). O padrão anterior era a lista fechada
+# dos prefixos canônicos do pacote — (PRD-FR|PRD-RNF|RFC-ALT|RFC-QA|
+# FDD-CONTRATO|FDD-ERR)-NN|ADR-NNN — e por isso media a cobertura contra 76
+# IDs, não contra os ~169 que um leitor externo enxerga: os documentos citam
+# também DEC-NN, RF-NN, RNF-NN, REC-NN, DIV-NN, COD-NN e GAN-NN, definidos só
+# em .planning/, que não faz parte da entrega. Medir contra a lista fechada
+# fazia o check passar enquanto o pacote continuava cheio de referência opaca.
+#
+# Exclusões: NENHUMA. A varredura de docs/PRD.md docs/RFC.md docs/FDD.md
+# docs/adrs/*.md README.md com este padrão devolve 169 IDs distintos e todos os
+# 169 são identificador de item — 14 prefixos, todos com definição no tracker
+# ou em §Itens sem origem identificável. Não há falso positivo a descartar:
+# ADR-NNN continua contando (é ID de item, não versão); HMAC-SHA256, ISO-8601,
+# UTF-8, X-Event-Id e afins não casam, porque exigem hífen imediatamente antes
+# de 2 ou 3 dígitos com fronteira de palavra depois. Se um dia aparecer um
+# falso positivo, ele entra aqui nomeado e justificado — nunca relaxando o
+# padrão para a conta fechar.
+TRK_ID_RE='[A-Z]{2,4}(-[A-Z]+)*-[0-9]{2,3}'
+TRK_ID_RE_B='\b'"$TRK_ID_RE"'\b'
 
 trk_secao="$(awk '/^## Referência cruzada$/ {f=1; next} /^## / {f=0} f' "$TRACKER_FILE")"
 [ -n "$trk_secao" ] || erro "TRK-1 encontrou a seção '## Referência cruzada' vazia (ou ausente) em $TRACKER_FILE"
@@ -1136,7 +1156,12 @@ trk_linhas_dados="$(printf '%s\n' "$trk_secao" | "$GREP" -E "^\\| *($TRK_ID_RE) 
 # Localização).
 # ---------------------------------------------------------------------------
 trk1_header_ok=0
-printf '%s\n' "$trk_secao" | "$GREP" -qxF "$TRK_HEADER" && trk1_header_ok=1
+# Here-string, não pipe: `grep -q` sai no primeiro casamento e fecha o pipe,
+# o `printf` morre com SIGPIPE (141) e, sob `set -o pipefail` (linha 102), o
+# status do pipeline vira 141 mesmo com o header presente. O defeito só
+# aparece quando a seção passa do buffer do pipe — antes da expansão do
+# tracker ela cabia inteira e o printf terminava antes de o grep sair.
+"$GREP" -qxF "$TRK_HEADER" <<< "$trk_secao" && trk1_header_ok=1
 
 trk1_linhas=0
 trk1_malformadas=""
@@ -1158,14 +1183,24 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# TRK-2: universo = IDs distintos que casam C-2, extraídos dos DOCUMENTOS
-# (docs/PRD.md docs/RFC.md docs/FDD.md docs/adrs/*.md) — nunca do tracker.
-# Cobertos = presentes na coluna ID da tabela principal do tracker.
-# cobertos/universo >= 0.80.
+# TRK-2: universo = IDs distintos que casam o padrão AMPLO acima, extraídos dos
+# DOCUMENTOS ENTREGUES (docs/PRD.md docs/RFC.md docs/FDD.md docs/adrs/*.md
+# README.md) — nunca do tracker. É o universo que o avaliador enxerga abrindo
+# só o que foi entregue. Cobertos = presentes na coluna ID da tabela principal
+# do tracker. cobertos/universo >= 0.80.
 # ---------------------------------------------------------------------------
-TRK2_DOCS=(docs/PRD.md docs/RFC.md docs/FDD.md docs/adrs/*.md)
+# Alvos parametrizáveis por $TRK2_ALVOS (lista separada por espaço), para que o
+# teste negativo rode contra cópia sob /tmp — ver .planning/14-teste-negativo.md.
+# Lista vazia é passagem vazia disfarçada de OK: sai por exit 2, não por OK.
+if [ -n "${TRK2_ALVOS+x}" ]; then
+  read -r -a TRK2_DOCS <<< "$TRK2_ALVOS"
+else
+  TRK2_DOCS=(docs/PRD.md docs/RFC.md docs/FDD.md docs/adrs/*.md README.md)
+fi
+[ "${#TRK2_DOCS[@]}" -gt 0 ] \
+  || erro "TRK-2 recebeu lista de alvos vazia em \$TRK2_ALVOS — sem documento para extrair o universo de IDs"
 
-trk2_universo="$("$GREP" -ohE "$TRK_ID_RE" "${TRK2_DOCS[@]}" 2>/dev/null | sort -u)"
+trk2_universo="$("$GREP" -ohE "$TRK_ID_RE_B" "${TRK2_DOCS[@]}" 2>/dev/null | sort -u)"
 trk2_n_universo="$(printf '%s' "$trk2_universo" | "$GREP" -c . || true)"
 [ "$trk2_n_universo" -gt 0 ] || erro "TRK-2 não encontrou nenhum ID rastreável nos documentos (${TRK2_DOCS[*]})"
 
