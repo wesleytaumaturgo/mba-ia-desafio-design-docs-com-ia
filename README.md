@@ -203,3 +203,15 @@ Ordem sugerida de leitura, do mais alto nível ao mais detalhado:
    escopo, métricas de sucesso.
 5. `docs/TRACKER.md` — a referência cruzada: de onde veio cada item dos quatro
    documentos acima, fala ou código, com a prova de conferência.
+
+**Reproduzindo a verificação.** O verificador executável dos critérios de aceite
+não faz parte da árvore entregue — é ferramenta de processo, não documento —,
+mas está preservado no histórico. Para rodar os 38 checks sobre o pacote final:
+
+```
+git worktree add /tmp/repro 07f8496
+cd /tmp/repro && ./scripts/verify.sh
+```
+
+`07f8496` é o único commit que reúne as duas coisas: o pacote já corrigido e o
+verificador ainda versionado.
