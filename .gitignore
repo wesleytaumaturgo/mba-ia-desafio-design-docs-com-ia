@@ -13,3 +13,7 @@ coverage/
 # ── Override do ~/.gitignore_global (linha 12: .planning/) ──
 # Artefatos de processo desta entrega precisam ser versionados.
 !.planning/
+
+# Artefatos de processo — fora da entrega, preservados no histórico
+.planning/
+scripts/
