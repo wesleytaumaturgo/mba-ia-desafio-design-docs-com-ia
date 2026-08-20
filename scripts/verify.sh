@@ -539,7 +539,12 @@ rfc2_secao="$(awk '/^## Metadados$/ {f=1; next} /^## / {f=0} f' "$RFC_FILE")"
 rfc2_revisores=0
 rfc2_revisores_ids=""
 for _n in "${rfc2_nomes[@]}"; do
-  printf '%s\n' "$rfc2_secao" | "$GREP" -qF "$_n" || continue
+  # Here-string, não pipe: `grep -q` sai no primeiro casamento e fecha o pipe,
+  # o `printf` morre com SIGPIPE (141) e, sob `set -o pipefail` (linha 102), o
+  # `|| continue` dispara com o nome presente. Mesmo defeito já corrigido em
+  # TRK-1; aqui a entrada é §Metadados de $RFC_FILE, que pode passar do buffer
+  # do pipe. Prova em .planning/14-teste-negativo.md §SIGPIPE.
+  "$GREP" -qF "$_n" <<< "$rfc2_secao" || continue
   "$GREP" -qF "$_n" "$TRANSCRICAO" || continue
   rfc2_revisores=$((rfc2_revisores + 1))
   rfc2_revisores_ids+=" $_n"

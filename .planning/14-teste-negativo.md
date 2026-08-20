@@ -262,7 +262,163 @@ Corrigido trocando o pipe por here-string, que não sofre SIGPIPE:
 "$GREP" -qxF "$TRK_HEADER" <<< "$trk_secao" && trk1_header_ok=1
 ```
 
-Ficam duas construções iguais e ainda não corrigidas, nas linhas 453 e 542, que
-hoje operam sobre entradas pequenas (uma entrada de diretório, a §Alternativas
-do RFC). São latentes pelo mesmo motivo, e vão falhar do mesmo jeito se as
-entradas crescerem além do buffer do pipe.
+Ficam duas construções iguais e ainda não corrigidas, nas linhas 453 e 542. A
+seção §SIGPIPE abaixo as investiga uma a uma.
+
+---
+
+## §SIGPIPE — as duas construções remanescentes
+
+O defeito só existe quando três condições coincidem: `set -o pipefail` ativo
+(linha 102 do script), `grep -q` do lado direito do pipe, e entrada grande o
+bastante para o `printf` ainda estar escrevendo quando o `grep` sai. A terceira
+é a que separa "mesmo padrão" de "mesmo defeito" — e é ela que precisa ser
+medida, não presumida.
+
+Capacidade do pipe nesta máquina: **65536 bytes**. Engine: `/usr/bin/grep`
+(GNU grep) 3.11.
+
+### As duas linhas
+
+| Linha | Check | O que é a entrada | Cota superior da entrada | Reproduz? |
+|---|---|---|---|---|
+| 453 | EST-2 | `$_e` — **uma** entrada de `ls -A docs/adrs` | `NAME_MAX` = 255 bytes | **NÃO** |
+| 542 | RFC-2 | `$rfc2_secao` — a seção `## Metadados` inteira de `$RFC_FILE` | nenhuma | **SIM** |
+
+---
+
+### Linha 542 (RFC-2) — o defeito é real
+
+`$rfc2_secao` é uma seção de documento, sem cota superior: cresce com o RFC. Se
+ela passar do buffer e o nome do revisor casar antes do fim, o `|| continue`
+dispara e o revisor **não é contado** — com o nome presente na seção.
+
+#### Harness isolado
+
+```bash
+cat > $S/sigpipe/harness-542.sh <<'EOF'
+#!/usr/bin/env bash
+set -uo pipefail
+GREP=/usr/bin/grep
+rfc2_secao="$(cat "$1")"
+_n="Bruno"
+printf '%s\n' "$rfc2_secao" | "$GREP" -qF "$_n"
+echo "exit=$?  bytes=$(printf '%s\n' "$rfc2_secao" | wc -c)"
+EOF
+
+# entrada pequena: a §Metadados real de docs/RFC.md
+awk '/^## Metadados$/ {f=1; next} /^## / {f=0} f' docs/RFC.md > $S/sigpipe/meta-pequena.txt
+# entrada grande: a mesma seção + padding além do buffer, com "Bruno" no topo (linha 7)
+{ cat $S/sigpipe/meta-pequena.txt; seq 1 20000 | sed 's/^/linha de padding /'; } \
+  > $S/sigpipe/meta-grande.txt
+```
+
+Saída literal, **antes** da correção:
+
+```
+--- 542 ANTES / entrada pequena (213 bytes) ---
+exit=0  bytes=212
+--- 542 ANTES / entrada grande (449107 bytes) ---
+exit=141  bytes=449107
+```
+
+`exit=141` = 128 + SIGPIPE(13). O `grep` achou "Bruno" na linha 7 e saiu; o
+`printf` ainda tinha 449 KB para escrever.
+
+#### Prova ponta-a-ponta, dentro do verify.sh
+
+`$RFC_FILE` aponta para uma cópia de `docs/RFC.md` com 20 000 linhas de padding
+acrescentadas **dentro** de `## Metadados`. Os cinco nomes continuam lá.
+
+```bash
+RFC_FILE=$S/sigpipe/RFC-grande.md ./scripts/verify.sh | grep -E '^RFC-2'
+```
+
+```
+RFC-2 FALHA — 8 headers conferidos, 0 revisor(es) conferível(is) em TRANSCRICAO.md (mínimo 3):
+```
+
+Zero revisores, contra cinco presentes. O check reprova um documento correto.
+
+#### Correção
+
+```diff
+-  printf '%s\n' "$rfc2_secao" | "$GREP" -qF "$_n" || continue
++  "$GREP" -qF "$_n" <<< "$rfc2_secao" || continue
+```
+
+#### Prova de que sumiu
+
+```
+--- 542 DEPOIS / entrada pequena (213 bytes) ---
+exit=0  bytes=212
+--- 542 DEPOIS / entrada grande (449107 bytes) ---
+exit=0  bytes=449107
+
+--- verify.sh RFC-2 com $RFC_FILE grande, DEPOIS ---
+RFC-2 OK — 8 headers canônicos conferidos, 0 ausentes; 5 revisores em §Metadados achados por grep -F em TRANSCRICAO.md (mínimo 3): Bruno Diego Larissa Marcos Sofia
+
+--- verify.sh RFC-2 com o RFC real, DEPOIS ---
+RFC-2 OK — 8 headers canônicos conferidos, 0 ausentes; 5 revisores em §Metadados achados por grep -F em TRANSCRICAO.md (mínimo 3): Bruno Diego Larissa Marcos Sofia
+```
+
+Exit correto com a entrada grande e comportamento inalterado com a normal.
+
+---
+
+### Linha 453 (EST-2) — o defeito NÃO se reproduz. Não foi corrigida.
+
+`$_e` não é uma seção nem um arquivo: é **uma** entrada de diretório, vinda de
+`done < <(ls -A "$ADR_DIR")`. O laço passa um nome por vez pelo pipe, e um nome
+de arquivo é limitado por `NAME_MAX`. O `printf` escreve no máximo 256 bytes e
+termina muito antes de o `grep` poder fechar o pipe — não há como bloquear, logo
+não há SIGPIPE.
+
+```bash
+$ getconf NAME_MAX docs/adrs
+255
+$ touch "docs/adrs/ADR-001-$(python3 -c 'print("a"*69980)').md"
+touch: não foi possível tocar '...': Nome de arquivo muito longo
+$ echo "rc=$?"
+rc=1
+```
+
+O sistema de arquivos recusa a entrada que estouraria o buffer. Com a maior
+entrada que ele aceita, a construção atual devolve o exit correto:
+
+```
+maior entrada aceita: 254 bytes
+exit=0  bytes=255      # ADR-001-aaa…(243 a's).md — casa o padrão
+exit=1  bytes=10       # README.md — não casa, como esperado
+```
+
+255 bytes contra 65536 de capacidade: fator 257 de folga. **A linha 453 fica
+como está.** É o mesmo formato de código, mas não é o mesmo defeito — trocá-la
+por here-string seria mexer num check que funciona, por simetria estética, sem
+teste que justifique. Se um dia o laço passar a alimentar o pipe com a lista
+inteira em vez de uma entrada por vez, a análise muda e a correção passa a valer.
+
+---
+
+### Varredura do resto do script
+
+O padrão pedido não encontra nada, porque o script nunca chama `grep` pelo nome
+— usa `"$GREP"`, resolvido para o binário real na linha 118:
+
+```
+$ grep -n 'printf.*|.*grep -q\|echo.*|.*grep -q\|cat.*|.*grep -q' scripts/verify.sh
+rc=1
+```
+
+Varredura equivalente, cobrindo as duas grafias:
+
+```
+$ grep -nE '\|[[:space:]]*("\$GREP"|grep)[[:space:]]+-[a-zA-Z]*q' scripts/verify.sh
+453:  printf '%s\n' "$_e" | "$GREP" -qE '^ADR-[0-9]{3}-[a-z0-9]+(-[a-z0-9]+)*\.md$' \
+```
+
+Sobra apenas a 453, analisada acima. As outras 33 chamadas a `"$GREP"` do lado
+direito de um pipe usam `-c`, `-o`, `-v` ou `-E` sem `-q`: todas leem a entrada
+até o fim, nunca fecham o pipe cedo e por construção não podem gerar SIGPIPE.
+Uma varredura por `\|[[:space:]]*"\$GREP"` lista as 34 ocorrências e confirma
+que só a 453 tem `-q`.
