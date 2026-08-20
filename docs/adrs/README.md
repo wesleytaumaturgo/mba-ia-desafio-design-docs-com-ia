@@ -24,9 +24,11 @@ com `### Positivas` e `### Negativas` obrigatórias.
 | [ADR-007](ADR-007-insercao-na-outbox-dentro-da-transacao.md) | Inserção na outbox dentro da transação do `changeStatus` | Aceito | DEC-18, DEC-21, DEC-22 | `[09:34] Diego` · `[09:41] Diego` |
 | [ADR-008](ADR-008-modelo-de-autorizacao-do-modulo.md) | Modelo de autorização do módulo de webhooks | Aceito | DEC-17, DEC-19, DEC-20 | `[09:32] Larissa` · `[09:36] Larissa` · `[09:37] Sofia` |
 
-Os IDs `DEC-NN` são os da extração da transcrição em
-`.planning/02-transcricao.md`, e a coluna Localização traz a fala que fecha cada
-decisão, no formato `[hh:mm] Nome`.
+Os IDs `DEC-NN` identificam as decisões extraídas da transcrição, uma por fala
+que fecha; o que cada um significa está em
+[`docs/TRACKER.md`](../TRACKER.md), que serve de glossário. A coluna Localização
+traz a fala que fecha cada decisão, no formato `[hh:mm] Nome`, conferível
+literalmente em `TRANSCRICAO.md`.
 
 ## Convenção de nomenclatura
 
@@ -35,8 +37,9 @@ Os arquivos desta pasta seguem o formato `ADR-NNN-titulo-em-kebab-case.md`, com
 `README.md`.
 
 O scaffolding original desta pasta declarava outra convenção,
-`NNNN-titulo-da-decisao.md`, com quatro dígitos; a divergência é deliberada e
-está decidida em `.planning/03-design.md` D-01 — o critério de aceite do desafio
-cita literalmente o formato de três dígitos, e é contra ele que a entrega é
-conferida. Este README foi reescrito como índice em vez de apagado justamente
-para que a troca de convenção ficasse registrada, e não silenciosa (D-06).
+`NNNN-titulo-da-decisao.md`, com quatro dígitos; a divergência é deliberada. O
+critério de aceite do desafio cita literalmente o formato de três dígitos —
+`ADR-NNN-titulo-em-kebab-case.md`, com `ADR-001-outbox-no-mysql.md` como
+exemplo —, e é contra ele que a entrega é conferida. Este README foi reescrito
+como índice em vez de apagado justamente para que a troca de convenção ficasse
+registrada, e não silenciosa.

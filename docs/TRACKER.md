@@ -2,10 +2,10 @@
 
 Este documento é a referência cruzada entre cada item rastreável do pacote
 (`docs/PRD.md`, `docs/RFC.md`, `docs/FDD.md`, `docs/adrs/`) e a fonte que o
-originou: a fala registrada em `.planning/02-transcricao.md` (conferível
-literalmente em `TRANSCRICAO.md`, por `grep -F`) ou o código lido em
-`.planning/02-codigo.md`/`.planning/02-ganchos-verificados.md` (conferível em
-`git ls-files`). Para ler uma linha: `ID` e `Documento` localizam o item no
+originou: a fala que o fechou na reunião (conferível literalmente em
+`TRANSCRICAO.md`, por `grep -F` sobre a Localização) ou o arquivo do código que
+o sustenta (conferível em `git ls-files`, e a linha citada, no próprio
+arquivo). Para ler uma linha: `ID` e `Documento` localizam o item no
 pacote; `Fonte` e `Localização` respondem "de onde isso veio, e como eu
 confiro". Nenhuma linha da tabela principal tem Localização inventada — todo
 item cuja origem não pôde ser apontada está em
@@ -17,8 +17,8 @@ e é o **glossário dos identificadores usados no pacote**. Qualquer `DEC-NN`,
 `RF-NN`, `RNF-NN`, `REC-NN`, `DIV-NN`, `COD-NN` ou `GAN-NN` que o leitor
 encontre em `docs/PRD.md`, `docs/RFC.md`, `docs/FDD.md`, `docs/adrs/` ou
 `README.md` tem aqui uma linha própria, com o que o identificador significa e
-de onde ele veio — sem depender dos artefatos de processo em `.planning/`, que
-não fazem parte da entrega. Identificador citado nos documentos e ausente
+de onde ele veio — sem depender de nenhum arquivo fora desta árvore.
+Identificador citado nos documentos e ausente
 daqui é falha do tracker, não licença para o leitor adivinhar — e essa cobertura
 foi medida por um check dedicado do verificador executável, sobre o mesmo
 universo amplo que um leitor externo enxerga. O verificador também não faz parte
@@ -170,7 +170,7 @@ preservado no histórico e é reproduzível a partir do commit `07f8496`, como o
 | REC-11 | docs/adrs/ADR-001-outbox-no-mysql.md | Adiado | Arquivamento das linhas já entregues da outbox — declarado fora do escopo desta feature; citado também em ADR-003 | TRANSCRICAO | `[09:08] Diego` |
 | REC-13 | docs/adrs/ADR-003-retry-backoff-e-dlq-em-tabela-separada.md | Adiado | Aviso por email ao cliente quando o webhook dele falha — fora de escopo desta fase, talvez na próxima | TRANSCRICAO | `[09:37] Larissa` |
 | REC-14 | docs/adrs/ADR-008-modelo-de-autorizacao-do-modulo.md | Adiado | Endurecimento do controle de acesso do CRUD de configuração — por enquanto qualquer role autenticada serve | TRANSCRICAO | `[09:37] Sofia` |
-| GAN-11 | docs/adrs/ADR-001-outbox-no-mysql.md | Gancho declarado | "Suporte a trigger no banco já existe hoje" — gancho AUSENTE no código na verificação de `.planning/02-ganchos-verificados.md`; a refutação está registrada em DIV-05 | TRANSCRICAO | `[09:09] Diego` |
+| GAN-11 | docs/adrs/ADR-001-outbox-no-mysql.md | Gancho declarado | "Suporte a trigger no banco já existe hoje" — gancho AUSENTE no código: não há `TRIGGER` em lugar nenhum de `prisma/`, e a migration é só `CREATE TABLE` e `ALTER TABLE … ADD … FOREIGN KEY`; a refutação está registrada em DIV-05 | TRANSCRICAO | `[09:09] Diego` |
 | GAN-22 | docs/adrs/ADR-004-hmac-sha256-secret-por-endpoint.md | Gancho declarado | "Validação por schema Zod já é o padrão do projeto" — gancho CONFIRMADO em `src/middlewares/validate.middleware.ts` e nas rotas de orders | TRANSCRICAO | `[09:23] Sofia` |
 | COD-01 | docs/FDD.md | Ponto de acoplamento | Mudança de status do pedido e ciclo de vida: `OrderService.changeStatus`, mais `canTransition` e `shouldDebitStock` em `src/modules/orders/order.status.ts` — é onde o gancho de emissão de evento entra | CODIGO | `src/modules/orders/order.service.ts:126` |
 | COD-10 | docs/FDD.md | Ponto de acoplamento | Configuração de ambiente: toda variável nova do módulo entra no `envSchema` de `src/config/env.ts` e no `.env.example`; um segundo processo Node reaproveita `env` e chama `createPrismaClient()` de `src/config/database.ts` | CODIGO | `src/config/env.ts:27` |
@@ -192,8 +192,8 @@ preservado no histórico e é reproduzível a partir do commit `07f8496`, como o
 ## Itens sem origem identificável
 
 Nenhuma linha desta seção recebeu Localização inventada. Cada uma foi varrida
-em `.planning/02-transcricao.md` e em `.planning/02-codigo.md` /
-`.planning/02-ganchos-verificados.md` e não encontrou fala nem artefato de
+em `TRANSCRICAO.md` e no código de `src/`, `prisma/`, `tests/` e
+`package.json`, e não encontrou fala nem artefato de
 código que sustente o conteúdo específico do item — só a hierarquia genérica de
 classes de erro (`AppError`/`ConflictError`/`UnprocessableEntityError`), comum a
 qualquer código HTTP do módulo e por isso insuficiente para apontar como

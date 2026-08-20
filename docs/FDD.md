@@ -4,19 +4,20 @@
 
 Este documento é o recorte de implementação do que o RFC propôs em nível de
 arquitetura. Ele existe porque a feature inteira é estrutura nova: a varredura do
-repositório em `.planning/02-codigo.md` §4 procurou `outbox`, `fila/broker`,
-`worker`, `scheduler/cron`, `hmac/crypto`, `retry/backoff`, `dead-letter`,
-`webhook`, `event`, `publisher/emissão`, `idempotência` e `trigger de banco` em
-`src/`, `prisma/`, `tests/` e `package.json` e devolveu saída vazia nos doze
+repositório procurou `outbox`, `fila/broker`, `worker`, `scheduler/cron`,
+`hmac/crypto`, `retry/backoff`, `dead-letter`, `webhook`, `event`,
+`publisher/emissão`, `idempotência` e `trigger de banco` em `src/`, `prisma/`,
+`tests/` e `package.json`, e devolveu saída vazia nos doze
 padrões. Não há símbolo, arquivo ou tabela existente que sirva de ponto de partida
 parcial — só padrões a seguir.
 
 O recorte técnico, então, é este: existe exatamente **um** ponto de acoplamento
 com código que já roda em produção, o método `OrderService.changeStatus`
 (`src/modules/orders/order.service.ts`:126), e ele é o método mais denso do
-projeto. Tudo o mais é código novo dentro de convenções velhas. As convenções
-estão levantadas símbolo a símbolo em `.planning/02-codigo.md` (COD-01 a COD-10) e
-são o insumo de §Integração com o sistema existente.
+projeto. Tudo o mais é código novo dentro de convenções velhas. Cada convenção
+está levantada, símbolo a símbolo e com o arquivo que a origina, em
+§Integração com o sistema existente — do ponto de acoplamento único (COD-01) à
+configuração de ambiente do processo novo (COD-10).
 
 O que este documento fecha, e o RFC deliberadamente não fechou: as colunas e os
 índices das tabelas novas, os estados e transições da linha de outbox, o contrato
@@ -852,10 +853,10 @@ batch, timeout de entrega — entram no `envSchema` de `src/config/env.ts`:3 e n
 direto fora desse arquivo, e o carregamento é fail-fast (`process.exit(1)` em
 falha de validação).
 
-**O que a feature não tem hoje.** Nada. A varredura de `.planning/02-codigo.md` §4
-confirmou ausência de outbox, fila, worker, scheduler, HMAC, retry, dead-letter,
-webhook, evento, publisher, idempotência e trigger em `src/`, `prisma/`, `tests/` e
-`package.json`. A única dependência de criptografia do projeto é `bcrypt`
+**O que a feature não tem hoje.** Nada. A varredura descrita em §Contexto e
+motivação técnica confirmou ausência de outbox, fila, worker, scheduler, HMAC,
+retry, dead-letter, webhook, evento, publisher, idempotência e trigger em
+`src/`, `prisma/`, `tests/` e `package.json`. A única dependência de criptografia do projeto é `bcrypt`
 (`package.json`:27), usada só no hash de senha
 (`src/modules/auth/auth.service.ts`:36) — a assinatura HMAC-SHA256 usa o módulo
 `crypto` do próprio Node, sem dependência nova. Um cliente HTTP para o envio é
