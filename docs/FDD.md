@@ -686,6 +686,14 @@ porque a classe estende a hierarquia do projeto e o código é o que fica gravad
 `webhook_deliveries` e em `webhook_dead_letter`. Elas são lidas pelo cliente por
 `GET /webhooks/:id/deliveries`, não por resposta direta.
 
+**A sequência salta o FDD-ERR-06.** O código `WEBHOOK_ROTATION_IN_GRACE_PERIOD`
+recusava uma segunda rotação dentro da janela de 24 horas e foi **retirado**: a
+fala que ele citava como origem institui o grace period e não fecha nada sobre
+re-rotação, e o bloqueio impediria revogar uma secret comprometida justamente
+durante as 24 horas em que ela ainda assina. Os demais IDs **não** foram
+renumerados, para não quebrar as referências cruzadas dos outros documentos; o
+registro da retirada está em `docs/TRACKER.md` §Códigos retirados.
+
 ## Estratégias de resiliência
 
 | Mecanismo | Valor | Origem |
